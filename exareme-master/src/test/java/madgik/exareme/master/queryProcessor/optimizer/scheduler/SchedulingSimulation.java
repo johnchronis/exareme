@@ -66,8 +66,8 @@ public class SchedulingSimulation {
         addOperatorLink("C","D");
         addOperatorLink("B","E");
         addOperatorLink("D","F");
-        addOperatorLink("E","F");
-        addOperatorLink("D","F");
+        addOperatorLink("E","G");
+        addOperatorLink("D","G");
 
         JsonBuilder jsonBuilder = new JsonBuilder();
         String jsonEP = jsonBuilder.parse(planExpress);
