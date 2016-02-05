@@ -50,6 +50,10 @@ public class PlanExpression implements Serializable {
         operatorList.add(instantiate);
     }
 
+    public void addOperatorConnect(OperatorLink opLink) {
+        operatorConnectList.add(opLink);
+    }
+
     //  public void addBuffer(Buffer buffer) {
     //    bufferList.add(buffer);
     //  }
@@ -68,10 +72,6 @@ public class PlanExpression implements Serializable {
 
     public void addState(State state) {
         stateList.add(state);
-    }
-
-    public void addOperatorConnect(OperatorLink opLink) {
-        operatorConnectList.add(opLink);
     }
 
     public void addStateLink(StateLink stateConnect) {
