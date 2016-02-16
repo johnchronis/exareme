@@ -2,6 +2,8 @@ package madgik.exareme.master.queryProcessor.optimizer.scheduler;
 
 import madgik.exareme.common.optimizer.FinancialProperties;
 import madgik.exareme.common.optimizer.RunTimeParameters;
+import madgik.exareme.master.app.cluster.ExaremeCluster;
+import madgik.exareme.master.app.cluster.ExaremeClusterFactory;
 import madgik.exareme.master.engine.executor.remote.operator.data.*;
 import madgik.exareme.master.queryProcessor.graph.ConcreteQueryGraph;
 import madgik.exareme.master.queryProcessor.graph.GraphGenerator;
@@ -41,26 +43,26 @@ public class SchedulingSimulation {
 
     @Before
     public void init(){
-        Logger.getRootLogger().setLevel(Level.OFF);
+        Logger.getRootLogger().setLevel(Level.DEBUG);
         planExpress = new PlanExpression();
         addPragmas(planExpress);
 
     }
 
     @Test
-    public void testSky() throws Exception {
+    public void testScheduling() throws Exception {
         addContainer("c1");
         addContainer("c2");
         addContainer("c3");
         addContainer("c4");
 
-        addOperator("A",10,"c1");
-        addOperator("B",10,"c2");
-        addOperator("C",10,"c1");
-        addOperator("D",10,"c2");
-        addOperator("E",10,"c3");
-        addOperator("F",10,"c4");
-        addOperator("G",10,"c1");
+        addOperator("A",1,"c1",1,10);
+        addOperator("B",1,"c2",1,10);
+        addOperator("C",1,"c1",1,10);
+        addOperator("D",1,"c2",1,10);
+        addOperator("E",1,"c3",1,10);
+        addOperator("F",1,"c4",1,10);
+        addOperator("G",1,"c1",1,10);
 
         addOperatorLink("A","B");
         addOperatorLink("C","D");
@@ -78,6 +80,11 @@ public class SchedulingSimulation {
         ExecutionPlan executionPlan = planParser.parse(jsonEP);
         System.out.println("Parsed :" + executionPlan.toString());
 
+        System.out.println("------- TEST --------");
+        ExaremeCluster miniCluster = ExaremeClusterFactory.createMiniCluster(1098, 8088, 5);
+        miniCluster.start();
+        System.out.println("Mini cluster started.");
+
         ExecutionEngineProxy engineProxy = ExecutionEngineLocator.getExecutionEngineProxy();
         ExecutionEngineSession engineSession = engineProxy.createSession();
         final ExecutionEngineSessionPlan sessionPlan = engineSession.startSession();
@@ -94,11 +101,17 @@ public class SchedulingSimulation {
         }
 
 
+
+
+
     }
 
-    void addOperator(String name, int RunTime_SEC,String container){
+    void addOperator(String name, int RunTime_SEC,String container, int parts, int sizeOfPart_MB){
         LinkedList<Parameter> params = new LinkedList<>();
         params.add(new Parameter("time",String.valueOf(RunTime_SEC)));
+        params.add(new Parameter("outputName",name+"table"));
+        params.add(new Parameter("parts",String.valueOf(parts)));
+        params.add(new Parameter("sizeOfPart_MB",String.valueOf(sizeOfPart_MB)));
 //        params.add(new Parameter("behavior","store_and_forward"));// activate if not inserted automatically
         String queryString = "S_"+String.valueOf(RunTime_SEC)+"_"+name;
         Operator operator = new Operator(name,SleepOperator,params,queryString,container,new HashMap<String, LinkedList<Parameter>>());
@@ -107,7 +120,8 @@ public class SchedulingSimulation {
 
 
     void addContainer(String name){
-        String ip = "127.0.0.1_container_127.0.0.1_" +String.valueOf(planExpress.getContainerList().size());
+        String MyIP = "195.134.66.19";
+        String ip = MyIP+"_container_"+MyIP+"_" +String.valueOf(planExpress.getContainerList().size());
         int port=1099,dtport = planExpress.getContainerList().size()+8088;
         Container container = new Container(name,ip,port,dtport);
         planExpress.addContainer(container);
@@ -124,6 +138,14 @@ public class SchedulingSimulation {
             //BAM
         }
         LinkedList<Parameter> paramList = new LinkedList<>();//add fake partitions to transfer, make the operator produce them
+        int i=0;
+        for( OperatorLink oplink : planExpress.getOperatorLinkList()){
+            if(oplink.from.equals(from)){
+                ++i;
+            }
+        }
+        paramList.add(new Parameter("table",from+"table"));
+        paramList.add(new Parameter("part",String.valueOf(i)));
 
         OperatorLink opLink = new OperatorLink(from,to,cont,paramList);
         planExpress.addOperatorConnect(opLink);

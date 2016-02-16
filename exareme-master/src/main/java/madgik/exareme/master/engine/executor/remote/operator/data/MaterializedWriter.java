@@ -33,7 +33,7 @@ public class MaterializedWriter extends AbstractSiNo {
 
             inStream = new ObjectInputStream(
                 super.getAdaptorManager().getReadStreamAdaptor(0).getInputStream());
-
+            log.debug("Input File NameBefore");
             inputFileName = (String) inStream.readObject();
             log.debug("Input File Name : '" + inputFileName + "'");
 
