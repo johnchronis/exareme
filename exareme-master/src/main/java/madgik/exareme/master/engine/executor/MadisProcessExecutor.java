@@ -41,14 +41,24 @@ public class MadisProcessExecutor {
     private ProcessManager procManager = null;
     private String compresion = AdpDBProperties.getAdpDBProps().getString("db.execute.compresion");
 
+    double  outsize=0; //MB
+    double memmax=0; //%
+    double cpuavg=0; //%
+    String opname;
+    double initmem;
+    long end,start;
+    double minmem;
+
     public MadisProcessExecutor(File directory, int page_size_B, int memory_MB,
-        ProcessManager procManager) {
+        ProcessManager procManager,String opname) {
         this.directory = directory;
         this.page_size_B = page_size_B;
         this.memory_MB = memory_MB;
         this.pages = memory_MB * 1024L * 1024L / this.page_size_B;
         this.procManager = procManager;
         log.debug("Directory is : " + directory.getAbsoluteFile());
+        this.opname = opname;
+
     }
 
     public MadisExecutorResult exec(ExecuteQueryState state) throws RemoteException {
@@ -294,8 +304,19 @@ public class MadisProcessExecutor {
                 }
             } else {
                 // Run query
+                 start = System.currentTimeMillis();
+                StatsThread statsThread = new StatsThread();
+                statsThread.start();
                 stats = ExecUtils.runQueryOnTable(script, madisMainDB, directory, procManager);
+                 end = System.currentTimeMillis();
+                cpuavg = statsThread.cpuavg;
+                memmax = statsThread.memmax;
+                initmem = statsThread.initmem;
+                minmem = statsThread.minmem;
+                statsThread.stop();
             }
+
+
 
             String outputDBFile = null;
             log.debug("Check if all output files are created ...");
@@ -305,6 +326,7 @@ public class MadisProcessExecutor {
                     if (broadcast && part != 0) {
                         File clonefile = new File(directory.getAbsolutePath() + "/" + outputTable + "." + part + ".db");
 //                        clonefile.createNewFile();
+
                         Pair<String, String> stdOutErr = procManager.createAndRunProcess(
                                 directory,
                                 "ln",
@@ -319,7 +341,7 @@ public class MadisProcessExecutor {
                     }
 
                     f = new File(directory.getAbsolutePath() + "/" + outputTable + "." + part + ".db");
-
+                    outsize +=f.length();//kB
                     if (!f.exists()) {
                         throw new ServerException(
                             "Partition not found:" + outputTable + "/" + part);
@@ -329,9 +351,24 @@ public class MadisProcessExecutor {
                     }
                 }
                 outputDBFile = directory.getAbsolutePath() + "/" + outputTable + "." + 0 + ".db";
+                outsize +=outputDBFile.length();//kB
             } else {
                 outputDBFile = directory.getAbsolutePath() + "/" + madisMainDB;
+                outsize +=outputDBFile.length();//kB
+
             }
+            if(outputParts>0) {
+                outsize *= outputParts;
+            }
+            outsize=0;
+            for (int part = 0; part < outputParts; ++part) {
+                File f = new File(directory.getAbsolutePath() + "/" + outputTable + "." + part + ".db");
+                outsize += f.length();
+            }
+            outsize /= 1024*1024;
+            log.debug("%% "+outputParts+" "+madisMainDB+" "+directory.getAbsolutePath());
+            log.debug("madisstats $$$ "+ opname+" time_ms "+(end-start) +" c "+cpuavg+" m "+(memmax)+ " monlyExa"+(memmax-initmem) + " " +minmem+ " d MB "+outsize);
+
             MadisExecutorResult execResult = new MadisExecutorResult();
             SQLDatabase sqlDB = DBUtils.createEmbeddedSqliteDB(outputDBFile);
             TableInfo tableInfo = sqlDB.getTableInfo(outputTable);

@@ -17,6 +17,8 @@ import madgik.exareme.master.engine.AdpDBExecutor;
 import madgik.exareme.master.engine.AdpDBManager;
 import madgik.exareme.master.engine.AdpDBOptimizer;
 import madgik.exareme.master.engine.AdpDBQueryExecutionPlan;
+import madgik.exareme.master.engine.executor.remote.AdpDBArtPlanGenerator;
+import madgik.exareme.master.engine.executor.remote.operator.data.*;
 import madgik.exareme.master.engine.historicalData.AdpDBHistoricalQueryData;
 import madgik.exareme.master.engine.parser.AdpDBParser;
 import madgik.exareme.master.queryProcessor.graph.ConcreteOperator;
@@ -25,14 +27,16 @@ import madgik.exareme.master.queryProcessor.graph.Link;
 import madgik.exareme.master.registry.Registry;
 import madgik.exareme.worker.art.container.ContainerJobs;
 import madgik.exareme.worker.art.container.ContainerProxy;
-import madgik.exareme.worker.art.executionPlan.parser.expression.Operator;
-import madgik.exareme.worker.art.executionPlan.parser.expression.PlanExpression;
+import madgik.exareme.worker.art.executionEngine.ExecEngineConstants;
+import madgik.exareme.worker.art.executionPlan.parser.expression.*;
 import madgik.exareme.worker.art.registry.ArtRegistryLocator;
 import org.apache.log4j.Logger;
 
 import java.awt.*;
+import java.awt.Container;
 import java.io.InputStream;
 import java.rmi.RemoteException;
+import java.rmi.ServerException;
 import java.util.*;
 import java.util.List;
 
@@ -230,6 +234,210 @@ public class RmiAdpDBClient implements AdpDBClient {
             "   \n" +
             "</body>\n" +
             "</html>");
+        return Json.toString();
+
+    }
+
+    private String explainJsonViz(String jsonPlan) throws RemoteException {
+        ///from jsonPlan to adbdbexecutionqueryplan//////
+//        PlanExpression planExpression = new PlanExpression();
+//
+//            planExpression.addPragma(
+//                    new Pragma(ExecEngineConstants.PRAGMA_MATERIALIZED_BUFFER_READER,
+//                            MaterializedReader.class.getName()));
+//            planExpression.addPragma(
+//                    new Pragma(ExecEngineConstants.PRAGMA_MATERIALIZED_BUFFER_WRITER,
+//                            MaterializedWriter.class.getName()));
+//            planExpression.addPragma(
+//                    new Pragma(ExecEngineConstants.PRAGMA_INTER_CONTAINER_MEDIATOR_FROM,
+//                            InterContainerMediatorFrom.class.getName()));
+//            planExpression.addPragma(
+//                    new Pragma(ExecEngineConstants.PRAGMA_INTER_CONTAINER_MEDIATOR_TO,
+//                            InterContainerMediatorTo.class.getName()));
+//            planExpression.addPragma(
+//                    new Pragma(ExecEngineConstants.PRAGMA_INTER_CONTAINER_DATA_TRANSFER,
+//                            DataTransferRegister.class.getName()));
+//
+//
+//        ContainerProxy[] container = execPlan.getContainerProxies();
+//        List<String> containers = new ArrayList<String>();
+//
+//        for (int i = 0; i < container.length; ++i) {
+//
+//            planExpression.addContainer(new madgik.exareme.worker.art.executionPlan.parser.expression.Container("c" + i, //name
+//                    container[i].getEntityName().getName(), //IP
+//                    container[i].getEntityName().getPort(),
+//                    container[i].getEntityName().getDataTransferPort())); //[JV] TOC: port
+//            String c = "c" + i;
+//            containers.add(c);
+//        }
+//
+//        // Add the any containers
+//        for (int i = 0; i < execPlan.getGraph().getNumOfOperators(); ++i) {
+//            planExpression.addContainer(new madgik.exareme.worker.art.executionPlan.parser.expression.Container("any" + i, //name
+//                    "any" + i, //IP
+//                    1099, 8088)); //[JV] TOC: port
+//            containers.add("any" + i);
+//        }
+//        HashMap<String, String> categoryMessageMap = new HashMap<>();
+//        try {
+//            AdpDBArtPlanGenerator
+//                    .generateJsonPlan(containers, execPlan, categoryMessageMap, planExpression, props);
+//        } catch (Exception e) {
+//            throw new ServerException("Cannot generate ART plan!", e);
+//        }
+
+
+
+
+
+        ////////////////////////////////////////////////
+
+
+
+
+
+        AdpDBQueryID queryId = createNewQueryID();
+        QueryScript script = parser.parse(jsonPlan, registry);
+        log.trace("QueryScript parsed.");
+
+        // optimize
+        AdpDBHistoricalQueryData queryData = null;
+        AdpDBQueryExecutionPlan plan = optimizer
+                .optimize(script, registry, null, queryData, queryId, properties, true  /* schedule */,
+                        true  /* validate */);
+
+        PlanExpression execPlan = executor.getExecPlan(plan, properties);
+
+        Integer countrepart = 0;
+
+
+        for (ConcreteOperator op : plan.getGraph().getOperators()) {
+            boolean isrep = true;
+            if (plan.getGraph().getOutputLinks(op.opID).size() == 4) {
+                for (Link link : plan.getGraph().getOutputLinks(op.opID)) {
+                    if (plan.getGraph().getInputLinks(link.to.opID).size() < 4) {
+                        isrep = false;
+                    }
+                }
+                if (isrep) {
+                    countrepart++;
+                }
+
+            }
+        }
+        countrepart = countrepart / 4;
+        StringBuilder Json = new StringBuilder();
+        Json.append("<html>\n" +
+                "<head>\n" +
+                "    <script type=\"text/javascript\" src=\"https://cdnjs.cloudflare.com/ajax/libs/vis/4.8.2/vis.min.js\"></script>\n"
+                +
+                "    <link href=\"https://cdnjs.cloudflare.com/ajax/libs/vis/4.8.2/vis.min.css\" rel=\"stylesheet\" type=\"text/css\" />\n"
+                +
+                "\n" +
+                "    <style type=\"text/css\">\n" +
+                "        #mynetwork {\n" +
+                "            width: 1000;\n" +
+                "            height: 800px;\n" +
+                "            border: 1px solid lightgray;\n" +
+                "        }\n" +
+                "    </style>\n" +
+                "</head>\n" +
+                "<body>\n" + countrepart.toString() +
+
+                "<div id=\"mynetwork\"></div>\n" +
+                "\n" +
+                "<script type=\"text/javascript\">");
+
+
+
+        StringBuilder nodes = new StringBuilder();
+        StringBuilder edges = new StringBuilder();
+        nodes.append(" var nodes = new vis.DataSet([\n");
+        edges.append(" var edges = new vis.DataSet([\n");
+        HashMap<String, Color> contToColor = new HashMap<>();
+        int countcont = execPlan.getContainerList().size();
+
+        for (madgik.exareme.worker.art.executionPlan.parser.expression.Container cont : execPlan
+                .getContainerList()) {
+            Random rand;
+            float r, g, b;
+            Color randomColor;
+            rand = new Random();
+            r = rand.nextFloat();
+            g = rand.nextFloat();
+            b = rand.nextFloat();
+            randomColor = new Color(r, g, b);
+            contToColor.put(cont.name, randomColor);
+        }
+        Color randomColor;
+        int id = 1;
+        Map<String, Integer> opidToOp = new HashMap<>();
+        for (Operator op : execPlan.getOperatorList()) {
+            if (id > 1) {
+                nodes.append(",");
+            }
+            randomColor = contToColor.get(op.containerName);
+            nodes.append("\n{id: ").append(id).append(", label: \'").append(op.operatorName)
+                    .append("\'").append(",color: ").append(
+                    "\'rgb(" + randomColor.getRed() + "," + randomColor.getGreen() + "," + randomColor
+                            .getBlue() + ")\'").append("}");
+
+            opidToOp.put(op.operatorName, id);
+            id++;
+        }
+
+
+
+        int count = 0;
+        for (ConcreteOperator op : plan.getGraph().getOperators()) {
+            if (plan.getGraph().getOutputLinks(op.opID).size() == 4) {
+                countrepart++;
+            }
+            for (Link link : plan.getGraph().getOutputLinks(op.opID)) {
+
+                // for(Link link :links){
+                if (count > 0) {
+                    edges.append(",");
+                }
+                String to = plan.getGraph().getOperator(link.to.opID).getName();
+                String from = plan.getGraph().getOperator(link.from.opID).getName();
+                ;
+                edges.append("\n{from: ").append(opidToOp.get(from)).append(", to: ")
+                        .append(opidToOp.get(to)).append("}");
+                count++;
+                //  }
+
+            }
+        }
+
+        nodes.append("]);\n");
+        edges.append(" ]);\n");
+
+        Json.append(nodes.toString()).append(edges.toString());
+
+        Json.append("var container = document.getElementById(\'mynetwork\');")
+                .append("var data = {\n" +
+                        "        nodes: nodes,\n" +
+                        "        edges: edges\n" +
+                        "    };\n" +
+                        "    var options = {\n" +
+                        " layout: { " +
+                        "hierarchical: {" +
+                        "   sortMethod: \"directed\" " +
+                        "}" +
+                        "      }," +
+                        "        edges:{\n" +
+                        "        arrows: {\n" +
+                        "          to:     {enabled: true, scaleFactor:1},\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "    };\n").append("var network = new vis.Network(container, data, options);\n");
+
+        Json.append("</script>\n" +
+                "   \n" +
+                "</body>\n" +
+                "</html>");
         return Json.toString();
 
     }

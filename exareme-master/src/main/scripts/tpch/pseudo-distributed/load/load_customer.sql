@@ -8,4 +8,4 @@ select
   cast(c6 as float) as c_acctbal,
   cast(c7 as text) as c_mktsegment,
   cast(c8 as text) as c_comment
-from (file '/home/vaggelis/tpch-kit/tpch/datasets/customer.tbl' delimiter:| fast:1);
+from (file '/home/johnchronis/dbs/tpch0.5/customer.tbl' delimiter:| fast:1);

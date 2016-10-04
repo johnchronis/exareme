@@ -16,4 +16,4 @@ select
   cast(c14 as text) as l_shipinstruct,
   cast(c15 as text) as l_shipmode,
   cast(c16 as text) as l_comment
-from (file '/home/vaggelis/tpch-kit/tpch/datasets/lineitem.tbl' delimiter:|);
+from (file '/home/johnchronis/dbs/tpch0.5/lineitem.tbl' delimiter:|);

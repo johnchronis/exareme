@@ -53,7 +53,7 @@ public class OperatorExecutionThread extends Thread {
         try {
 
             abstractOperator.getSessionManager().getOperatorStatistics().setStartTime_ms(start);
-            abstractOperator.run();
+            abstractOperator.run(abstractOperator.getSessionManager().getOpID().operatorName);
             abstractOperator.start = start;
             if (!abstractOperator.getSessionManager().getOperatorType()
                 .equals(OperatorType.dataTransfer)) {//dt ops do not terminate now

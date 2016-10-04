@@ -9,4 +9,4 @@ select
   cast(c7 as text) as o_clerk,
   cast(c8 as int) as o_shippriority,
   cast(c9 as text) as o_comment
-from (file '/home/vaggelis/tpch-kit/tpch/datasets/orders.tbl' delimiter:|);
+from (file '/home/johnchronis/dbs/tpch0.5/orders.tbl' delimiter:|);

@@ -8,4 +8,4 @@ select
   cast(c6 as float) as s_acctbal,
   cast(c7 as text) as s_comment,
   cast(c8 as text) as s_emtpy
-from (file '/home/vaggelis/tpch-kit/tpch/datasets/supplier.tbl' delimiter:|);
+from (file '/home/johnchronis/dbs/tpch0.5/supplier.tbl' delimiter:|);

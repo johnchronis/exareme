@@ -18,7 +18,7 @@ public class InterContainerMediatorTo extends AbstractSiSo {
 
     private static Logger log = Logger.getLogger(InterContainerMediatorTo.class);
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
 
         //        String sessionName = super.getParameterManager().getParameter("Name").get(0).getValue();
 

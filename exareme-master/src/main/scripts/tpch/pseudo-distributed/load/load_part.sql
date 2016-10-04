@@ -9,4 +9,4 @@ select
   cast(c7 as text) as p_container,
   cast(c8 as float) as p_retailprice,
   cast(c9 as text) as p_comment
-from (file 'fast:1' '/home/vaggelis/tpch-kit/tpch/datasets/part.tbl' delimiter:|);
+from (file 'fast:1' '/home/johnchronis/dbs/tpch0.5/part.tbl' delimiter:|);

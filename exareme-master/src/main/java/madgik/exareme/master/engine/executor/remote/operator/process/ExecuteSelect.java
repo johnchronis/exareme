@@ -17,7 +17,7 @@ public class ExecuteSelect extends AbstractMiMo {
 
     private static Logger log = Logger.getLogger(ExecuteSelect.class);
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
         log.trace("Parse DB Operator ...");
         AdpDBSelectOperator dbOp =
             Base64Util.decodeBase64(super.getParameterManager().getQueryString());
@@ -36,7 +36,7 @@ public class ExecuteSelect extends AbstractMiMo {
         super.getAdaptorManager().closeAllInputs();
 
         log.debug("Execute query ...");
-        state.executeSelect();
+        state.executeSelect( opname);
 
         log.debug("Write output ...");
         if (super.getAdaptorManager().getOutputCount() > 0) {

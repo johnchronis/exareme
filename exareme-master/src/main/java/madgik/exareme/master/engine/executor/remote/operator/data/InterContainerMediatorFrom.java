@@ -18,7 +18,7 @@ public class InterContainerMediatorFrom extends AbstractSiSo {
 
     private static Logger log = Logger.getLogger(InterContainerMediatorFrom.class);
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
         ObjectInputStream inStream = new ObjectInputStream(
             super.getAdaptorManager().getReadStreamAdaptor(0).getInputStream());
 

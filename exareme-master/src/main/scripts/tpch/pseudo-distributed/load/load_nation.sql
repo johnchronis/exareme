@@ -4,4 +4,4 @@ select
   cast(c2 as text) as n_name,
   cast(c3 as int) as n_regionkey,
   cast(c4 as text) as n_comment
-from (file '/home/vaggelis/tpch-kit/tpch/datasets/nation.tbl' delimiter:|);
+from (file '/home/johnchronis/dbs/tpch0.5/nation.tbl' delimiter:|);

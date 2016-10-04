@@ -45,6 +45,8 @@ public class ExecUtils {
         log.debug("Process Directory: " + directory.getAbsolutePath());
         try {
             Process p = procManager.createProcess(directory, python, engine, madisMainDB);
+
+
             p.getOutputStream().write(query.toString().getBytes());
             p.getOutputStream().flush();
             p.getOutputStream().close();
@@ -56,6 +58,8 @@ public class ExecUtils {
             InputStreamConsumerThread stderr =
                 new InputStreamConsumerThread(p.getErrorStream(), false);
             stderr.start();
+
+
 
             int exitCode = p.waitFor();
             stdout.join();

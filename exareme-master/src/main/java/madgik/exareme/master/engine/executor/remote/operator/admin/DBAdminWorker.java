@@ -19,7 +19,7 @@ import java.util.Map;
 public class DBAdminWorker extends AbstractMiMo {
     private static final Logger log = Logger.getLogger(DBAdminWorker.class);
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
         try {
             log.debug("---- DBAdminWorker ----");
             for (Parameter parameter : getParameterManager().getParameters()) {

@@ -14,7 +14,7 @@ import java.io.ObjectOutputStream;
  */
 public class MaterializedReader extends AbstractNiSo {
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
         String sessionName = super.getParameterManager().getParameter("Name").get(0).getValue();
 
         // Read the name of the file and the random file.

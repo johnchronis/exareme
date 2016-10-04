@@ -25,7 +25,7 @@ public class AdpDBNetReaderOperator extends AbstractNiNo {
     public AdpDBNetReaderOperator() {
     }
 
-    @Override public void run() {
+    @Override public void run(String opname) {
         try {
             log.debug("---- NetReader ----");
             for (Parameter parameter : getParameterManager().getParameters()) {
