@@ -37,6 +37,18 @@ public class DecomposerUtils {
 	public static final boolean USE_ORDER_BY;
 	public static final boolean REMOVE_OUTPUTS;
 	public static final boolean PUSH_PROCESSING;
+	public static final boolean WRITE_ALIASES;
+	public static final double DISK_SCAN;
+	public static final int MOST_PROMINENT;
+	public static final boolean USE_GREEDY;
+	public static final long EXPAND_DAG_TIME;
+	public static final long ONLY_LEFT_TIME;
+	public static final double DISTRIBUTED_LIMIT;
+	public static final boolean CHOOSE_MODE;
+	public static final int MERGE_UNIONS;
+	public static final boolean USE_ROWID;
+	public static final boolean USE_CROSS_JOIN;
+	public static final boolean REPARTITION;
 
     static {
         GenericProperties properties = AdpProperties.getDecomposerProperties();
@@ -46,6 +58,8 @@ public class DecomposerUtils {
         ANALYZER_LOG_LEVEL = properties.getString("analyzer.logLevel");
         Logger.getLogger("madgik.exareme.master.queryProcessor.analyzer")
             .setLevel(Level.toLevel(ANALYZER_LOG_LEVEL));
+        Logger.getLogger("madgik.exareme.master.queryProcessor.estimator")
+        .setLevel(Level.toLevel(ANALYZER_LOG_LEVEL));
 
         CENTRALIZED = properties.getBoolean("centralized");
         MULTI = properties.getBoolean("multi");
@@ -69,7 +83,19 @@ public class DecomposerUtils {
         
         REMOVE_OUTPUTS=properties.getBoolean("remove.outputs");
         PUSH_PROCESSING=properties.getBoolean("push.processing");
-        
+        WRITE_ALIASES=properties.getBoolean("write.aliases");
+        DISK_SCAN=properties.getFloat("disk.scan");
+        MOST_PROMINENT=properties.getInt("most.prominent");
+        USE_GREEDY=properties.getBoolean("use.greedy");
+        EXPAND_DAG_TIME=properties.getLong("expand.dag.time");
+        ONLY_LEFT_TIME=properties.getLong("only.left.time");
+        DISTRIBUTED_LIMIT=properties.getLong("distributed.limit");
+        CHOOSE_MODE = properties.getBoolean("choose.mode");
+        MERGE_UNIONS=properties.getInt("merge.unions");
+    	USE_ROWID=properties.getBoolean("use.rowid");
+    	USE_CROSS_JOIN=properties.getBoolean("use.cross.join");
+    	REPARTITION=properties.getBoolean("repartition");
+    	
         log.trace("Decomposer Properties Loaded.");
     }
 

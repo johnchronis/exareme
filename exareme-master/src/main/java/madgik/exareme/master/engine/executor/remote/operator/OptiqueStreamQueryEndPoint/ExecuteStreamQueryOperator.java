@@ -29,7 +29,7 @@ import org.apache.log4j.Logger;
 public class ExecuteStreamQueryOperator extends AbstractNiNo {
     private static Logger log = Logger.getLogger(ExecuteStreamQueryOperator.class);
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
         log.trace("Parsing parameters ...");
         String queryString = super.getParameterManager().getQueryString();
         int port =

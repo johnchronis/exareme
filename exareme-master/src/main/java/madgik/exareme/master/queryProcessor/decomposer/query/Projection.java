@@ -75,7 +75,6 @@ public class Projection implements Operand {
         if ((obj == null) || (obj.getClass() != this.getClass())) {
             return false;
         }
-        // object must be Test at this point
         Projection other = (Projection) obj;
         if (other.getOperands().size() == this.ops.size()) {
             for (Output o : this.ops) {
@@ -99,7 +98,7 @@ public class Projection implements Operand {
 
             }
             else{
-            	hash=31 * hash + Objects.hashCode(o.getOutputName()) + Objects.hashCode(o.getObject());
+            	hash=31 * hash + Objects.hashCode(o.getOutputName()) + o.getObject().hashCode();
             }
         }
         return hash;
@@ -111,7 +110,7 @@ public class Projection implements Operand {
         }
     }
 
-    @Override public Operand clone() throws CloneNotSupportedException {
+    @Override public Projection clone() throws CloneNotSupportedException {
         Projection cloned = new Projection();
         for (Output o : this.ops) {
             cloned.ops.add(o.clone());

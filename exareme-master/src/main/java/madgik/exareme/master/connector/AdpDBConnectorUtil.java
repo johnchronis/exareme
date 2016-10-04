@@ -132,7 +132,7 @@ public class AdpDBConnectorUtil {
         PlanSessionStatusManagerProxy sessionManager =
             sessionPlan.getPlanSessionStatusManagerProxy();
         int waifForMs =
-            1000 * AdpDBProperties.getAdpDBProps().getInt("db.client.statisticsUpdate_sec");
+                AdpDBProperties.getAdpDBProps().getInt("db.client.statusCheckInterval");
         try {
             NetSession net = new NetSessionSimple();
             InputStream inputStream = net.openInputStream(socketBuffer);
@@ -140,7 +140,12 @@ public class AdpDBConnectorUtil {
             inputStream.close();
             socketBuffer.close();
         } catch (IOException e) {
-            throw new RemoteException("Cannot read table", e);
+        	if(e.getMessage().equals("Pipe closed")){
+        		log.error("Remote Connection was closed while sending result table");
+        	}
+        	else{
+        		throw new RemoteException("Cannot read table", e);
+        	}
         }
         while (sessionManager.hasFinished() == false && sessionManager.hasError() == false) {
             try {
@@ -187,4 +192,41 @@ public class AdpDBConnectorUtil {
             throw new RemoteException("Cannot get results", e);
         }
     }
+    public static void executeLocalQuery(String query, Set<String> referencedTables, int part, String database,
+            Map<String, Object> alsoIncludeProps, OutputStream out) throws RemoteException {
+            try {
+                Gson g = new Gson();
+                SQLDatabase db =
+                    DBUtils.createEmbeddedSqliteDB(database + "/temp" +  ".db");
+                for(String referencedTbl:referencedTables){
+                	db.execute("attach database '"+database+"/"+referencedTbl+"."+part+".db' as "+referencedTbl);
+                }
+                ResultSet rs = db.executeAndGetResults(query + ";");
+                int cols = rs.getMetaData().getColumnCount();
+                if (alsoIncludeProps != null) {
+                    Map<String, Object> schema = new HashMap<String, Object>();
+                    schema.putAll(alsoIncludeProps);
+                    ArrayList<String[]> names = new ArrayList<String[]>();
+                    schema.put("schema", names);
+                    for (int c = 0; c < cols; ++c) {
+                        names.add(new String[] {rs.getMetaData().getColumnName(c + 1),
+                            rs.getMetaData().getColumnTypeName(c + 1)});
+                    }
+                    out.write((g.toJson(schema) + "\n").getBytes());
+                }
+                ArrayList<Object> row = new ArrayList<Object>();
+                while (rs.next()) {
+                    for (int c = 0; c < cols; ++c) {
+                        row.add(rs.getObject(c + 1));
+                    }
+                    out.write((g.toJson(row) + "\n").getBytes());
+                    row.clear();
+                }
+                rs.close();
+                db.close();
+            } catch (Exception e) {
+                throw new RemoteException("Cannot execute query", e);
+            }
+        }
+    
 }

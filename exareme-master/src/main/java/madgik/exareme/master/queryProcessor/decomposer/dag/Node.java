@@ -20,7 +20,7 @@ import com.google.common.hash.Hashing;
 /**
  * @author dimitris
  */
-public class Node {
+public class Node implements Comparator<Node>, Comparable<Node>{
 
 	public static final int OR = 0;
 	public static final int AND = 1;
@@ -41,18 +41,22 @@ public class Node {
 	public static final int UNIONALL = 14;
 	public static final int NESTED = 15;
 	public static final int BASEPROJECT = 16;
+	public static final int LEFTJOIN = 17;
+	public static final int RIGHTJOIN = 18;
+	public static final int JOINKEY = 19;
+	public static final int CENTRALIZEDJOIN = 13;
 	// private boolean isBaseTable;
 	private int type;
 	private int prunningCounter;
 	// private int parentCounter;
-	//private int hashID;
+	// private int hashID;
 	private List<Node> children;
 	private List<Node> parents;
 	private Set<String> descendantBaseTables;
 	private int opCode;
 	private Object o;
 	private boolean expanded;
-	private boolean isCentralised;
+	private boolean shareableComputed;
 	private boolean hashNeedsRecomputing;
 	private Set<PartitionCols> partitionedColumns;
 	private Set<PartitionCols> isBottomNodeForPruningColumns;
@@ -62,11 +66,13 @@ public class Node {
 	private Set<PruningInfo> pi;
 	private boolean isMaterialised;
 	private HashCode hash;
+	private Set<Integer> unions;
 
 	// private Set<Column> redundantRepartitions;
 
 	public Node(int type) {
 		this.hashNeedsRecomputing = true;
+		shareableComputed=false;
 		this.type = type;
 		this.opCode = -1;
 		prunningCounter = 0;
@@ -84,6 +90,7 @@ public class Node {
 		pi = new HashSet<PruningInfo>();
 		isMaterialised = false;
 		descendantBaseTables = new HashSet<String>();
+		unions = new HashSet<Integer>();
 		// redundantRepartitions=new HashSet<Column>();
 	}
 
@@ -105,6 +112,7 @@ public class Node {
 		pi = new HashSet<PruningInfo>();
 		isMaterialised = false;
 		descendantBaseTables = new HashSet<String>();
+		unions = new HashSet<Integer>();
 		// redundantRepartitions=new HashSet<Column>();
 	}
 
@@ -132,7 +140,7 @@ public class Node {
 	 */
 	public HashCode computeHashID() {
 
-		List<HashCode> codes=new ArrayList<HashCode>();
+		List<HashCode> codes = new ArrayList<HashCode>();
 		codes.add(Hashing.sha1().hashInt(opCode));
 		for (Node c : this.children) {
 			codes.add(c.getHashId());
@@ -144,23 +152,18 @@ public class Node {
 				codes.add(t.getHashID());
 			}
 			this.hash = Hashing.combineUnordered(codes);
-		} 
-		else if (o instanceof Operand) 
-		{
-			
-			Operand op=(Operand)o;
+		} else if (o instanceof Operand) {
+
+			Operand op = (Operand) o;
 			codes.add(op.getHashID());
 			this.hash = Hashing.combineOrdered(codes);
-		}
-		else if (o instanceof String) 
-		{
+		} else if (o instanceof String) {
 			codes.add(Hashing.sha1().hashBytes(((String) o).getBytes()));
 			this.hash = Hashing.combineOrdered(codes);
-		}
-		else{
+		} else {
 			this.hash = Hashing.combineOrdered(codes);
 		}
-		
+
 		this.hashNeedsRecomputing = false;
 		return hash;
 		// }
@@ -223,7 +226,7 @@ public class Node {
 	}
 
 	public List<Node> getChildren() {
-		return this.children;
+		return Collections.unmodifiableList(this.children);
 	}
 
 	public Object getObject() {
@@ -243,11 +246,11 @@ public class Node {
 		this.setHashNeedsRecomputing();
 	}
 
-	public String dotPrint() {
+	public StringBuilder dotPrint(Set<Node> visited) {
 		StringBuilder result = new StringBuilder();
 		HashSet<String> shapes = new HashSet<String>();
 		LinkedList<Node> queue = new LinkedList<Node>();
-
+		
 		queue.offer(this); // Place start node in queue
 		shapes.add(this.dotShape());
 		while (!queue.isEmpty()) {
@@ -256,18 +259,23 @@ public class Node {
 			if (!v.getChildren().isEmpty()) {
 				for (int i = 0; i < v.getChildren().size(); i++) {
 					Node c = v.getChildren().get(i);
+					if(visited.contains(c)){
+						continue;
+					}
+					//visited.add(c);
 					queue.add(c);
 					shapes.add(c.dotShape());
 					result.append(v.dotString());
 					result.append(" -> ");
 					result.append(c.dotString());
 					// result.append("[label=\"").append(i).append("\"]");
-					result.append(";");
+					result.append(";\n");
 				}
 
 			}
 			// else {
-			// result.append("type:"+v.type+" opCode:"+v.opCode+" object:"+v.o.toString());
+			// result.append("type:"+v.type+" opCode:"+v.opCode+"
+			// object:"+v.o.toString());
 			// }
 
 			queue.removeFirst();
@@ -280,7 +288,7 @@ public class Node {
 			result.insert(0, it.next());
 		}
 		result.insert(0, "strict digraph G{ {");
-		return result.toString();
+		return result;
 	}
 
 	private String dotString() {
@@ -324,28 +332,29 @@ public class Node {
 		// }
 
 		String object = o.toString();
-		String fillcolor="";
+		String fillcolor = "";
 		if (o instanceof Table) {
+
 			Table t = (Table) o;
 			if (t.getAlias() == null) {
-				//object = "Intermediate Result";
-				object=t.getName();
-				if(this.parents.isEmpty()){
-					object="Result";
+				// object = "Intermediate Result";
+				object = t.getName();
+				if (this.parents.isEmpty()) {
+					object = "Result";
 				}
-			}else{
-				if(t.getName().startsWith("RECALL_")){
-					 fillcolor=" fillcolor=\"yellow\" style=\"filled\"";
-				} else if(t.getName().startsWith("SLEGGE_")){
-					 fillcolor=" fillcolor=\"red\" style=\"filled\"";
-				}
-				else if(t.getName().startsWith("SLEGGE1_")){
-					 fillcolor=" fillcolor=\"green\" style=\"filled\"";
-				}
-				else if(t.getName().startsWith("OPENWORKSBRAGE_")){
-					 fillcolor=" fillcolor=\"green\" style=\"filled\"";
+			} else {
+				if (t.getName().startsWith("RECALL_")) {
+					fillcolor = " fillcolor=\"yellow\" style=\"filled\"";
+				} else if (t.getName().startsWith("SLEGGE_")) {
+					fillcolor = " fillcolor=\"red\" style=\"filled\"";
+				} else if (t.getName().startsWith("SLEGGE1_")) {
+					fillcolor = " fillcolor=\"green\" style=\"filled\"";
+				} else if (t.getName().startsWith("OPENWORKSBRAGE_")) {
+					fillcolor = " fillcolor=\"green\" style=\"filled\"";
 				}
 			}
+			if (this.nodeInfo != null)
+				object += "card:" + this.getNodeInfo().getNumberOfTuples();
 		}
 		if (this.opCode == LEFTBROADCASTJOIN) {
 			object += "L:";
@@ -353,13 +362,15 @@ public class Node {
 		if (this.opCode == RIGHTBROADCASTJOIN) {
 			object += "R:";
 		}
-		if(this.opCode == PROJECT){
+		if (this.opCode == PROJECT) {
 			object = "Project";
 		}
-		return String.valueOf(this.hashCode()) + "[label= \"" + object  +"\""+  fillcolor+"]" + " [shape=" + shape + "]" ;
-		//return String.valueOf(this.hashCode()) + "[label= \"" + object + "::"
-		//		+ this.descendantBaseTables.toString() + " id:"
-		//		+ this.getHashId() + "\"]" + " [shape=" + shape + "]";
+		object += " " + unions.toString();
+		return String.valueOf(this.hashCode()) + "[label= \"" + object + "\"" + fillcolor + "]" + " [shape=" + shape
+				+ "]";
+		// return String.valueOf(this.hashCode()) + "[label= \"" + object + "::"
+		// + this.descendantBaseTables.toString() + " id:"
+		// + this.getHashId() + "\"]" + " [shape=" + shape + "]";
 	}
 
 	public boolean isExpanded() {
@@ -370,13 +381,7 @@ public class Node {
 		this.expanded = expanded;
 	}
 
-	public void setIsCentralised(boolean tableIsCentralised) {
-		this.isCentralised = tableIsCentralised;
-	}
 
-	public boolean isCentralised() {
-		return this.isCentralised;
-	}
 
 	public int getOpCode() {
 		return this.opCode;
@@ -512,8 +517,7 @@ public class Node {
 	 * PartitionCols pr = new PartitionCols(cols); this.partitionRecord.add(pr);
 	 * this.lastPartition = pr; return true; }
 	 */
-	public Set<Pair<PartitionCols, Node>> existsInPreviousPartitionsAndCheckForPruning(
-			Node parent, Column c) {
+	public Set<Pair<PartitionCols, Node>> existsInPreviousPartitionsAndCheckForPruning(Node parent, Column c) {
 		Set<Pair<PartitionCols, Node>> result = new HashSet<Pair<PartitionCols, Node>>();
 		PartitionCols existing = null;
 		// for (Column c : cols) {
@@ -525,18 +529,15 @@ public class Node {
 		}
 		// }
 		if (existing != null) {
-			Set<Pair<Column, Node>> lastJoiningColumns = this
-					.getChildreJoiningColumns();
+			Set<Pair<Column, Node>> lastJoiningColumns = this.getChildreJoiningColumns();
 			// indicates which PartitionCols are the last one and for which node
 			// Set<Pair<PartitionCols, Node>> lastJoiningPartitionSets=new
 			// HashSet<Pair<PartitionCols, Node>>();
 			for (Pair<Column, Node> p : lastJoiningColumns) {
-				PartitionCols pc = partitionRecord.getPartitionColsFor(p
-						.getVar1());
+				PartitionCols pc = partitionRecord.getPartitionColsFor(p.getVar1());
 				if (existing != pc) {
 					// result.add(new Pair(pc, p.getVar2()));
-					PruningInfo prun = new PruningInfo(parent, p.getVar2(),
-							existing);
+					PruningInfo prun = new PruningInfo(parent, p.getVar2(), existing);
 					this.pi.add(prun);
 					p.getVar2().searchForBottomPruningNodes(existing);
 				}
@@ -549,8 +550,7 @@ public class Node {
 		return result;
 	}
 
-	public void mergePartitionRecords(PartitionRecord otherPartitionRecord,
-			List<Column> joiningCols) {
+	public void mergePartitionRecords(PartitionRecord otherPartitionRecord, List<Column> joiningCols) {
 		// PartitionCols joining = new PartitionCols();
 		// joining.addColumns(joiningCols);
 
@@ -574,8 +574,7 @@ public class Node {
 		// this.partitionRecord.add(joining);
 		for (PartitionCols these : this.partitionRecord.getPartitionCols()) {
 			for (PartitionCols others : otherPartitionRecord.getPartitionCols()) {
-				if (!Collections.disjoint(these.getColumns(),
-						others.getColumns())) {
+				if (!Collections.disjoint(these.getColumns(), others.getColumns())) {
 					these.addColumns(others.getColumns());
 					toRemove.add(others);
 				}
@@ -592,8 +591,7 @@ public class Node {
 
 		for (Node child : this.children) {
 			if (child.getObject() instanceof NonUnaryWhereCondition) {
-				NonUnaryWhereCondition nuwc = (NonUnaryWhereCondition) child
-						.getObject();
+				NonUnaryWhereCondition nuwc = (NonUnaryWhereCondition) child.getObject();
 				boolean addPrunning = true;
 
 				Column j = nuwc.getLeftOp().getAllColumnRefs().get(0);
@@ -713,7 +711,21 @@ public class Node {
 			int[] result = new int[1];
 			// result[0]=RIGHTBROADCASTJOIN;
 			// result[1]=LEFTBROADCASTJOIN;
-			result[0] = REPARTITIONJOIN;
+			boolean centralised=false;
+			/*if(this.children.size()==2){
+				for(Node c:children){
+				if(c.nodeInfo!=null && c.nodeInfo.getNumberOfTuples()*c.getNodeInfo().getTupleLength()>300000){
+					centralised=false;
+					break;
+				}
+			}
+			}*/
+			
+			if(!centralised){
+				result[0] = REPARTITIONJOIN;
+			}else{
+				result[0] = CENTRALIZEDJOIN;
+			}
 			return result;
 		} else {
 			int[] result = new int[1];
@@ -724,6 +736,7 @@ public class Node {
 
 	public NodeInfo getNodeInfo() {
 		return nodeInfo;
+		
 	}
 
 	public void setNodeInfo(NodeInfo nodeInfo) {
@@ -747,20 +760,85 @@ public class Node {
 	}
 
 	public int count(int i) {
-		if(this.isMaterialised){
+		if (this.isMaterialised) {
 			return 0;
-		}
-		else{
-			if(this.type==Node.OR){
-			i++;
+		} else {
+			if (this.type == Node.OR) {
+				i++;
 			}
-			this.isMaterialised=true;
-			for(Node c:this.children){
-				i+=c.count(0);
+			this.isMaterialised = true;
+			for (Node c : this.children) {
+				i += c.count(0);
 			}
 		}
 		// TODO Auto-generated method stub
 		return i;
 	}
+
+	public Set<Integer> getUnions() {
+		return unions;
+	}
+
+	public void setUnions(Set<Integer> unions) {
+		this.unions = unions;
+	}
+
+	public void addUnionToDesc(int counter) {
+		if (unions.add(counter)) {
+			for (Node c : this.children) {
+				c.addUnionToDesc(counter);
+			}
+		}
+	}
+
+	public void addShareable(List<Node> shareable) {
+		if(shareableComputed){
+			return;
+		}
+		if (this.unions.size() > 1 && this.type == Node.OR && !shareable.contains(this) && this.getDescendantBaseTables().size()>1) {
+			boolean hasFilterJoinParent=false;
+			for(Node p:this.parents){
+				if(p.getChildren().size()==1&&p.getOpCode()==JOIN){
+					hasFilterJoinParent=true;
+					break;
+				}
+			}
+			if (!hasFilterJoinParent&&shareable.add(this)) {
+				return;
+			}
+		}
+		for (Node c : this.children) {
+			c.addShareable(shareable);
+		}
+		shareableComputed=true;
+
+	}
+
+	public int compareTo(Node other) {
+		int thisScore = (getUnions().size() * 10) + getDescendantBaseTables().size();
+		int otherScore = (other.getUnions().size() * 10) + other.getDescendantBaseTables().size();
+		if (thisScore > otherScore) {
+			return 1;
+		} else if (otherScore > thisScore) {
+			return -1;
+		} else {
+			return 0;
+		}
+	}
+
+	public int compare(Node d, Node d1) {
+		int thisScore = (d.getUnions().size() * 10) + d.getDescendantBaseTables().size();
+		int otherScore = (d1.getUnions().size() * 10) + d1.getDescendantBaseTables().size();
+		return thisScore - otherScore;
+	}
+
+	@Override
+	public String toString() {
+		return "Node [opCode=" + opCode + ", o=" + o + "]";
+	}
+
+
+	
+	
 
 }

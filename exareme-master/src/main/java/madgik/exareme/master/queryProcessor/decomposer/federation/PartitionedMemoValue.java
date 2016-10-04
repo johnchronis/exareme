@@ -2,6 +2,7 @@ package madgik.exareme.master.queryProcessor.decomposer.federation;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 import madgik.exareme.master.queryProcessor.decomposer.dag.PartitionCols;
 
@@ -12,9 +13,9 @@ public class PartitionedMemoValue implements MemoValue {
     private double repCost;
     private boolean materialized;
     private PartitionCols dlvdPart;
-    private boolean used;
+    private int used;
     private boolean multiUsed;
-    private List<MemoKey> toMat;
+    private Set<MemoKey> toMat;
 
     public PartitionedMemoValue(SinglePlan p, double repCost) {
         this.p = p;
@@ -47,15 +48,15 @@ public class PartitionedMemoValue implements MemoValue {
     }
 
 	@Override
-	public void setUsed(boolean b) {
-		if(used && b){
+	public void addUsed(int b) {
+		if(used==1 && b==1){
 			this.multiUsed=true;
 		}
 		this.used=b;
 	}
 
 	@Override
-	public boolean isUsed() {
+	public int getUsed() {
 		return used;
 	}
 
@@ -68,7 +69,7 @@ public class PartitionedMemoValue implements MemoValue {
 		return toMat;
 	}
 
-	public void setToMat(List<MemoKey> toMaterialize) {
+	public void setToMat(Set<MemoKey> toMaterialize) {
 		toMat=toMaterialize;
 	}
 

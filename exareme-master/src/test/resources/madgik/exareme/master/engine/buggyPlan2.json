@@ -22,7 +22,7 @@
   "operators": [
     {
       "container": "c2",
-      "operator": "madgik.exareme.master.engine.executor.remote.operator.sleepOperator",
+      "operator": "madgik.exareme.master.engine.executor.remote.operator.buggyOperator",
       "name": "bug0",
       "queryString": "sleep 0",
       "parameters": [

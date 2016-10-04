@@ -79,9 +79,9 @@ public class DBInfoWriterDB {
                         "postgres " + "h:" + host + " port:" + port + " u:" + params[3] + " p:"
                             + params[4] + " db:" + db;
                 }
-                statement.executeUpdate("DELETE FROM endpoint WHERE id = '" + params[0] + "';");
+                statement.executeUpdate("DELETE FROM endpoint WHERE id = '" + params[0].toUpperCase() + "';");
                 statement.executeUpdate(
-                    "INSERT INTO endpoint VALUES ('" + params[0] + "','" + params[1] + "','"
+                    "INSERT INTO endpoint VALUES ('" + params[0].toUpperCase() + "','" + params[1] + "','"
                         + params[2] + "','" + params[3] + "','" + params[4] + "','" + madisString
                         + "','" + params[5] + "');");
                 statement.close();
@@ -114,9 +114,9 @@ public class DBInfoWriterDB {
                 directory += "/";
             }
             connection = DriverManager.getConnection("jdbc:sqlite:" + directory + "endpoints.db");
+            connection.setAutoCommit(false);
             Statement statement = connection.createStatement();
             statement.setQueryTimeout(30);  // set timeout to 30 sec.
-
 
 
             DatabaseMetaData dbm = connection.getMetaData();
@@ -127,9 +127,9 @@ public class DBInfoWriterDB {
                     "create table aliases (tablename string, aliases string)");
             }
 
-
            
             for(String tablename:n2a.getTables()){
+            	//System.out.println(tablename);
             	statement.executeUpdate("DELETE FROM aliases WHERE tablename = '" +tablename + "';");
             	String aliasesForTable="";
             	String del="";
@@ -142,9 +142,7 @@ public class DBInfoWriterDB {
                         "INSERT INTO aliases VALUES ('" + tablename + "','"  + aliasesForTable + "');");
                     
             }
-                
                 statement.close();
-
         } catch (SQLException e) {
             // if the error message is "out of memory", 
             // it probably means no database file is found
@@ -152,6 +150,7 @@ public class DBInfoWriterDB {
         } finally {
             try {
                 if (connection != null) {
+                	connection.commit();
                     connection.close();
                 }
             } catch (SQLException e) {

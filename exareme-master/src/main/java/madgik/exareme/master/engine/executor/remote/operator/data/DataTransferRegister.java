@@ -24,7 +24,7 @@ public class DataTransferRegister extends AbstractMiMo {
 
     private static Logger log = Logger.getLogger(DataTransferRegister.class);
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
         log.info("Starting DataTransfer Register, out operators: " + super.getParameterManager()
             .getOutOperators());
         int size = super.getParameterManager().getOutOperators().size();

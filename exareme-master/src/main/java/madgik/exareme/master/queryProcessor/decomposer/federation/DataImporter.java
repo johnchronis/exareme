@@ -20,18 +20,33 @@ import java.util.Map;
 public class DataImporter implements Runnable {
 	private SQLQuery s;
 	private String dbPath;
+	private DB db;
 	private boolean addToRegistry;
+	private String fedSQLTrue;
+	private String fedSQLFalse;
+	private String error;
+	Map<String, String> correspondingOutputs;
+	
 	private static final Logger log = Logger.getLogger(DataImporter.class);
 
-	public DataImporter(SQLQuery q, String db) {
+	public DataImporter(SQLQuery q, String db, DB dbinfo) {
+		this.db=dbinfo;
 		this.s = q;
 		this.dbPath = db;
 		this.addToRegistry=false;
+        correspondingOutputs=new HashMap<String, String>();
+		if (this.db.getDriver().contains("OracleDriver")) {
+			correspondingOutputs=s.renameOracleOutputs();
+		}
+		fedSQLTrue=s.getExecutionStringInFederatedSource(true);
+		fedSQLFalse=s.getExecutionStringInFederatedSource(false);
+		
 	}
 
 	@Override
 	public void run() {
-		DB db = DBInfoReaderDB.dbInfo.getDBForMadis(s.getMadisFunctionString());
+		int columnsNumber=0;
+		//DB db = DBInfoReaderDB.dbInfo.getDBForMadis(s.getMadisFunctionString());
 		StringBuilder createTableSQL = new StringBuilder();
 		if (db == null) {
 			log.error("Could not import Data. DB not found:"
@@ -49,18 +64,16 @@ public class DataImporter implements Runnable {
 
 		String conString = db.getURL();
 		
-		Map<String, String> correspondingOutputs=new HashMap<String, String>();
-		if (db.getDriver().contains("OracleDriver")) {
-			correspondingOutputs=s.renameOracleOutputs();
-		}
+		
+		
 
-		String qString = s.getExecutionStringInFederatedSource(true);
-		log.debug("importing:" + qString);
+		//fedSQL = s.getExecutionStringInFederatedSource(true);
+		log.debug("importing:" + fedSQLTrue);
 		Connection connection = null;
 		Statement statement = null;
 		ResultSet resultSet = null;
 		long start = -1;
-		long count = 0;
+		int count = 0;
 		Connection sqliteConnection = null;
 		PreparedStatement sqliteStatement = null;
 		String importString="import/";
@@ -71,6 +84,7 @@ public class DataImporter implements Runnable {
 		}
 
 		try {
+			
 			sqliteConnection = DriverManager.getConnection("jdbc:sqlite:"
 					+ dbPath + importString + s.getTemporaryTableName() + part);
 			// statement.setQueryTimeout(30);
@@ -102,16 +116,17 @@ public class DataImporter implements Runnable {
 
 			if (db.getDriver().contains("postgresql")
 					&& DecomposerUtils.USE_POSTGRES_COPY) {
-				SQLiteWriter swriter=new SQLiteWriter(sqliteConnection, DecomposerUtils.NO_OF_RECORDS, s.getExecutionStringInFederatedSource(false), statement, sql, createTableSQL);
+				SQLiteWriter swriter=new SQLiteWriter(sqliteConnection, DecomposerUtils.NO_OF_RECORDS, fedSQLFalse, statement, sql, createTableSQL);
 				CopyManager copyManager = new CopyManager((BaseConnection) connection);
-	            count=copyManager.copyOut("COPY ("+qString+") TO STDOUT WITH DELIMITER '#'", swriter);
+	            count=(int)copyManager.copyOut("COPY ("+fedSQLTrue+") TO STDOUT WITH DELIMITER '#'", swriter);
 	            swriter.close();
 			} else {
-
-				resultSet = statement.executeQuery(qString);
+				StringBuffer primaryKeySQL=new StringBuffer();
+				primaryKeySQL.append(", PRIMARY KEY(");
+				resultSet = statement.executeQuery(fedSQLTrue);
 
 				ResultSetMetaData rsmd = resultSet.getMetaData();
-				int columnsNumber = rsmd.getColumnCount();
+				columnsNumber = rsmd.getColumnCount();
 				String comma = "";
 				String questionmark = "?";
 				for (int i = 1; i <= columnsNumber; i++) {
@@ -135,6 +150,8 @@ public class DataImporter implements Runnable {
 					} else if (JdbcDatatypesToSQLite.BLOB == type) {
 						coltype = "BLOB";
 					}
+					primaryKeySQL.append(comma);
+					primaryKeySQL.append(l);
 					createTableSQL.append(comma);
 					createTableSQL.append(l);
 					createTableSQL.append(" ");
@@ -142,8 +159,17 @@ public class DataImporter implements Runnable {
 					comma = ",";
 				}
 				sql += ")";
-				createTableSQL.append(")");
+				if(DecomposerUtils.USE_ROWID&&s.isOutputColumnsDinstict()&&rsmd.getColumnCount()==1){
+					primaryKeySQL.append(") ) without rowid");
+					createTableSQL.append(primaryKeySQL);
+				}
+				else{
+					createTableSQL.append(")");
+				}
+				
 				Statement creatSt = sqliteConnection.createStatement();
+				log.debug("dropping table if exists");
+				creatSt.execute("drop table if exists "+s.getTemporaryTableName());
 				log.debug("executing:" +createTableSQL);
 				creatSt.execute(createTableSQL.toString());
 				creatSt.close();
@@ -154,8 +180,13 @@ public class DataImporter implements Runnable {
 					
 
 					for (int i = 1; i <= columnsNumber; i++) {
-
-						sqliteStatement.setObject(i, resultSet.getObject(i));
+						Object ob=resultSet.getObject(i);
+						if(ob instanceof Date){
+							sqliteStatement.setObject(i, ob.toString());
+						}
+						else{
+						sqliteStatement.setObject(i, ob);
+						}
 					}
 
 					sqliteStatement.addBatch();
@@ -179,12 +210,14 @@ public class DataImporter implements Runnable {
 		} catch (Exception e) {
 			e.printStackTrace();
 			log.error("Could not import data from endpoint\n" + e.getMessage() +
-					" from query:"+qString);
+					" from query:"+fedSQLTrue);
+			error="Could not import data from endpoint\n" + e.getMessage() +
+					" from query:"+fedSQLTrue;
 			return;
 		}
 
 		log.debug(count + " rows were imported in "
-				+ (System.currentTimeMillis() - start) + "msec from query: "+ qString);
+				+ (System.currentTimeMillis() - start) + "msec from query: "+ fedSQLTrue);
 		StringBuilder madis = new StringBuilder();
 		madis.append("sqlite '");
 		madis.append(this.dbPath);
@@ -205,12 +238,18 @@ public class DataImporter implements Runnable {
 			//TableInfo ti=new TableInfo(s.getTemporaryTableName());
 			//ti.setSqlDefinition(createTableSQL.toString());
 			table.setTemp(false);
-			/*if use cache
 			table.setSqlQuery(s.toDistSQL());
-			table.setSize(4096);
-			table.setHashID(s.getHashId().asBytes());*/
+			table.setSize(count*columnsNumber*4);//to be fixed
+			if(s.getHashId()==null){
+				log.error("null hash ID for query "+fedSQLTrue);
+				table.setHashID(null);
+			}
+			else{
+				table.setHashID(s.getHashId().asBytes());
+			}
 			PhysicalTable pt=new PhysicalTable(table);
 			Partition partition0 = new Partition(s.getTemporaryTableName(), 0);
+			//partition0.addLocation("127.0.0.1");
             partition0.addLocation(ArtRegistryLocator.getLocalRmiRegistryEntityName().getIP());
             //partition0.addPartitionColumn("");
 			pt.addPartition(partition0);
@@ -222,5 +261,14 @@ public class DataImporter implements Runnable {
 	public void setAddToRegisrty(boolean b){
 		this.addToRegistry=b;
 	}
+
+	public void setFedSQL(String fedSQL) {
+		this.fedSQLTrue = fedSQL;
+		this.fedSQLFalse = fedSQL;
+	}
+	public String getError(){
+		return error;
+	}
+	
 
 }

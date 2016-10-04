@@ -3,12 +3,15 @@
  */
 package madgik.exareme.master.engine.executor.remote.operator.data;
 
+import madgik.exareme.common.app.engine.AdpDBOperatorType;
 import madgik.exareme.common.app.engine.AdpDBSelectOperator;
 import madgik.exareme.common.schema.Select;
 import madgik.exareme.common.schema.Table;
 import madgik.exareme.master.engine.executor.remote.operator.ExecuteQueryState;
 import madgik.exareme.utils.encoding.Base64Util;
 import madgik.exareme.utils.file.FileReaderThread;
+import madgik.exareme.utils.net.NetUtil;
+import madgik.exareme.utils.properties.AdpDBProperties;
 import madgik.exareme.worker.art.concreteOperator.AbstractMiMo;
 import madgik.exareme.worker.art.container.adaptor.WriteAdaptorWrapper;
 import org.apache.log4j.Logger;
@@ -23,7 +26,7 @@ public class TableUnionReplicator extends AbstractMiMo {
 
     private static Logger log = Logger.getLogger(TableUnionReplicator.class);
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
         log.trace("Parse DB Operator ...");
         AdpDBSelectOperator dbOp =
             Base64Util.decodeBase64(super.getParameterManager().getQueryString());
@@ -44,7 +47,7 @@ public class TableUnionReplicator extends AbstractMiMo {
         Select q = state.getOperator().getQuery();
         q.clearQueryStatement();
         q.addQueryStatement(q.getQuery());
-        state.executeSelect();
+        state.executeSelect(opname);
 
         ArrayList<FileReaderThread> fileReaders = new ArrayList<FileReaderThread>();
         for (String table : dbOp.getOutputTables()) {
@@ -72,18 +75,45 @@ public class TableUnionReplicator extends AbstractMiMo {
         }
         log.debug("Finished writing tables!");
         super.getAdaptorManager().closeAllOutputs();
-        if (super.getAdaptorManager().getOutputCount() == 0) {
-            log.debug("Save the non-temporary tables ...");
-            Table outputTable = dbOp.getQuery().getOutputTable().getTable();
-            if (outputTable.isTemp() == false) {
-                log.debug("Saving output table (" + outputTable.getName() + ") ...");
+
+        //if(AdpDBProperties.getAdpDBProps().getString("db.cache").equals("true")) {
+        if(dbOp.useCache()){
+            if (dbOp.getType() == AdpDBOperatorType.tableUnionReplicator) {
+                Table outputTable = dbOp.getQuery().getOutputTable().getTable();
+                state.getExitMessage().outTableInfo.setLocation(NetUtil.getIPv4());
+                log.debug("Saving output table (" + outputTable.getName() + ") ..." + dbOp.getType());
                 state.saveOutputTable();
             }
-        } else {
-            log.debug("Skip saving tables ... ");
+            log.debug(state.toString());
+        }else {
+
+            if (super.getAdaptorManager().getOutputCount() == 0) {
+                log.debug("Save the non-temporary tables ...");
+                Table outputTable = dbOp.getQuery().getOutputTable().getTable();
+                if (outputTable.isTemp() == false) {
+                    log.debug("Saving output table (" + outputTable.getName() + ") ...");
+                    state.saveOutputTable();
+                }
+            } else {
+                log.debug("Skip saving tables ... ");
+            }
         }
+
         log.debug(state.toString());
         exit(0, state.getExitMessage());
-        //        exit(0);
+
+//        if (super.getAdaptorManager().getOutputCount() == 0) {
+//            log.debug("Save the non-temporary tables ...");
+//            Table outputTable = dbOp.getQuery().getOutputTable().getTable();
+//            if (outputTable.isTemp() == false) {
+//                log.debug("Saving output table (" + outputTable.getName() + ") ...");
+//                state.saveOutputTable();
+//            }
+//        } else {
+//            log.debug("Skip saving tables ... ");
+//        }
+//        log.debug(state.toString());
+//        exit(0, state.getExitMessage());
+//     //           exit(0);
     }
 }

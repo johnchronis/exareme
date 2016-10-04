@@ -68,8 +68,11 @@ public class Table {
     		log.debug("null table name:"+this.toString());
     		return null;
     	}
+    	//log.debug("searching for endpoint with id:"+getName().toUpperCase());
         for (String id : DBInfoReaderDB.dbInfo.getAllDBIDs()) {
+        	//log.debug("next endpoint has id:"+id);
             if (getName().toUpperCase().startsWith(id.toUpperCase() + "_")) {
+            	//log.debug("found!");
                 return id;
             }
         }
@@ -102,7 +105,10 @@ public class Table {
             return false;
         }
         Table otherT = (Table) other;
-        if (this.getAlias() == null) {
+        if (this.getName() == null && otherT.getName() == null) {
+        	            return this.getAlias().equals(otherT.getAlias());
+        	        }
+        if (this.getAlias() == null&&otherT.getAlias() == null) {
             return this.getName().equals(otherT.getName());
         }
         return (this.getName().equals(otherT.getName()) && this.getAlias()

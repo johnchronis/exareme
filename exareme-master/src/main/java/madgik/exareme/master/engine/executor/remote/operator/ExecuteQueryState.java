@@ -248,7 +248,7 @@ public class ExecuteQueryState {
         return null;
     }
 
-    public void executeSelect() throws RemoteException {
+    public void executeSelect(String opname) throws RemoteException {
         if (isInitialized == false) {
             initialize();
         }
@@ -268,7 +268,8 @@ public class ExecuteQueryState {
         // Create the executor
         MadisProcessExecutor exec = new MadisProcessExecutor(rootDirectory,
             AdpDBProperties.getAdpDBProps().getInt("db.engine.pageSize_b"),
-            AdpDBProperties.getAdpDBProps().getInt("db.engine.defaultMemory_mb"), procManager);
+            AdpDBProperties.getAdpDBProps().getInt("db.engine.defaultMemory_mb"), procManager,
+             opname   );
 
         // Execute select query
         execResult = exec.exec(this);
@@ -426,6 +427,7 @@ public class ExecuteQueryState {
 
                     log.debug("Try to put : " + file.getAbsolutePath() + " to " + tableFile);
                     storageClient.put(file.getAbsolutePath(), tableFile);
+                    this.getExitMessage().outTableInfo.setSizeInBytes((long) new File(tableFile).length());
 
                 } catch (Exception e) {
                     throw new ServerException("Cannot save table: " + tableFile, e);

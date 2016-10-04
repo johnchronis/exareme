@@ -19,7 +19,7 @@ public class MaterializedWriter extends AbstractSiNo {
 
     private static Logger log = Logger.getLogger(MaterializedWriter.class);
 
-    @Override public void run() throws Exception {
+    @Override public void run(String opname) throws Exception {
         ObjectInputStream inStream = null;
         File tableFile = null;
         String inputFileName = null;
@@ -33,7 +33,7 @@ public class MaterializedWriter extends AbstractSiNo {
 
             inStream = new ObjectInputStream(
                 super.getAdaptorManager().getReadStreamAdaptor(0).getInputStream());
-            log.debug("Input File NameBefore");
+
             inputFileName = (String) inStream.readObject();
             log.debug("Input File Name : '" + inputFileName + "'");
 

@@ -4,6 +4,7 @@
  */
 package madgik.exareme.master.queryProcessor.estimator.db;
 
+import madgik.exareme.master.queryProcessor.decomposer.dag.NodeHashValues;
 import madgik.exareme.master.queryProcessor.estimator.histogram.Bucket;
 import madgik.exareme.master.queryProcessor.estimator.histogram.Histogram;
 
@@ -12,176 +13,229 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import org.jfree.util.Log;
+
 /**
  * @author jim
  */
 public class RelInfo {
-    public static final int DEFAULT_NUM_PARTITIONS = 0;
-    private String relName;
-    private Map<String, AttrInfo> attrIndex;
-    private double numberOfTuples;
-    private int tupleLength;
-    private int numberOfPartitions;
-    private Set<String> hashAttr;
+	public static final int DEFAULT_NUM_PARTITIONS = 0;
+	private String relName;
+	private Map<String, AttrInfo> attrIndex;
+	private double numberOfTuples;
+	private int tupleLength;
+	private int numberOfPartitions;
+	private Set<String> hashAttr;
+	private static final org.apache.log4j.Logger log = org.apache.log4j.Logger.getLogger(RelInfo.class);
 
-    /*constructor*/
-    public RelInfo(String relName, Map<String, AttrInfo> attrIndex, double numberOfTuples,
-        int tupleLength, int numberOfPartitions, Set<String> hashAttr) {
+	/* constructor */
+	public RelInfo(String relName, Map<String, AttrInfo> attrIndex,
+			double numberOfTuples, int tupleLength, int numberOfPartitions,
+			Set<String> hashAttr) {
 
-        this.relName = relName;
-        this.attrIndex = attrIndex;
-        this.numberOfTuples = numberOfTuples;
-        this.tupleLength = tupleLength;
-        this.numberOfPartitions = numberOfPartitions;
-        this.hashAttr = hashAttr;
-    }
+		this.relName = relName;
+		this.attrIndex = attrIndex;
+		this.numberOfTuples = numberOfTuples;
+		this.tupleLength = tupleLength;
+		this.numberOfPartitions = numberOfPartitions;
+		this.hashAttr = hashAttr;
+	}
 
-    /*copy constructor*/
-    public RelInfo(RelInfo rel) {
-        this.relName = rel.getRelName();
-        this.numberOfTuples = rel.getNumberOfTuples();
-        this.tupleLength = rel.getTupleLength();
-        this.numberOfPartitions = rel.getNumberOfPartitions();
-        this.attrIndex = new HashMap<String, AttrInfo>();
-        this.hashAttr = new HashSet<String>(rel.getHashAttr());
+	/* copy constructor */
+	public RelInfo(RelInfo rel) {
+		this.relName = rel.getRelName();
+		this.numberOfTuples = rel.getNumberOfTuples();
+		this.tupleLength = rel.getTupleLength();
+		this.numberOfPartitions = rel.getNumberOfPartitions();
+		this.attrIndex = new HashMap<String, AttrInfo>();
+		this.hashAttr = new HashSet<String>(rel.getHashAttr());
 
-        for (Map.Entry<String, AttrInfo> e : rel.getAttrIndex().entrySet()) {
-            this.attrIndex.put(e.getKey(), new AttrInfo(e.getValue()));
-        }
-    }
+		for (Map.Entry<String, AttrInfo> e : rel.getAttrIndex().entrySet()) {
+			this.attrIndex.put(e.getKey(), new AttrInfo(e.getValue()));
+		}
+	}
 
-    /*getters and seters*/
-    public String getRelName() {
-        return relName;
-    }
+	public RelInfo(RelInfo rel, String tableAlias, boolean isNested) {
+		this.relName = rel.getRelName();
+		this.numberOfTuples = rel.getNumberOfTuples();
+		this.tupleLength = rel.getTupleLength();
+		this.numberOfPartitions = rel.getNumberOfPartitions();
+		this.attrIndex = new HashMap<String, AttrInfo>();
+		this.hashAttr = new HashSet<String>(rel.getHashAttr());
+		if (!isNested) {
+			for (Map.Entry<String, AttrInfo> e : rel.getAttrIndex().entrySet()) {
+				this.attrIndex.put(tableAlias + "." + e.getKey(), new AttrInfo(
+						e.getValue()));
+			}
+		} else {
+			for (Map.Entry<String, AttrInfo> e : rel.getAttrIndex().entrySet()) {
+				// replace previous alias with nested alias
+				String previousAlias = "";
+				if (e.getKey().indexOf(".") > -1) {
+					previousAlias = e.getKey().substring(0,
+							e.getKey().indexOf("."));
+					this.attrIndex.put(
+							e.getKey().replace(previousAlias, tableAlias),
+							new AttrInfo(e.getValue()));
 
-    public void setRelName(String relName) {
-        this.relName = relName;
-    }
+				} else {
+					previousAlias = tableAlias + "_";
+					this.attrIndex
+							.put(e.getKey().replace(previousAlias,
+									tableAlias + "."),
+									new AttrInfo(e.getValue()));
 
-    public Map<String, AttrInfo> getAttrIndex() {
-        return attrIndex;
-    }
+				}
+			}
+		}
+	}
 
-    public void setAttrIndex(Map<String, AttrInfo> attrIndex) {
-        this.attrIndex = attrIndex;
-    }
+	/* getters and seters */
+	public String getRelName() {
+		return relName;
+	}
 
-    public double getNumberOfTuples() {
-        return numberOfTuples;
-    }
+	public void setRelName(String relName) {
+		this.relName = relName;
+	}
 
-    public void setNumberOfTuples(double numberOfTuples) {
-        this.numberOfTuples = numberOfTuples;
-    }
+	public Map<String, AttrInfo> getAttrIndex() {
+		return attrIndex;
+	}
 
-    public int getTupleLength() {
-        return tupleLength;
-    }
+	public void setAttrIndex(Map<String, AttrInfo> attrIndex) {
+		this.attrIndex = attrIndex;
+	}
 
-    public void setTupleLength(int tupleLength) {
-        this.tupleLength = tupleLength;
-    }
+	public double getNumberOfTuples() {
+		return numberOfTuples;
+	}
 
-    public int getNumberOfPartitions() {
-        return numberOfPartitions;
-    }
+	public void setNumberOfTuples(double numberOfTuples) {
+		this.numberOfTuples = numberOfTuples;
+	}
 
-    public void setNumberOfPartitions(int numberOfPartitions) {
-        this.numberOfPartitions = numberOfPartitions;
-    }
+	public int getTupleLength() {
+		return tupleLength;
+	}
 
-    public Set<String> getHashAttr() {
-        return hashAttr;
-    }
+	public void setTupleLength(int tupleLength) {
+		this.tupleLength = tupleLength;
+	}
 
-    public void setHashAttr(Set<String> hashAttr) {
-        this.hashAttr = hashAttr;
-    }
+	public int getNumberOfPartitions() {
+		return numberOfPartitions;
+	}
 
+	public void setNumberOfPartitions(int numberOfPartitions) {
+		this.numberOfPartitions = numberOfPartitions;
+	}
 
+	public Set<String> getHashAttr() {
+		return hashAttr;
+	}
 
-    public double totalRelSize() {
-        return this.numberOfTuples * this.tupleLength;
-    }
+	public void setHashAttr(Set<String> hashAttr) {
+		this.hashAttr = hashAttr;
+	}
 
+	public double totalRelSize() {
+		return this.numberOfTuples * this.tupleLength;
+	}
 
-    /*standard methods*/
-    @Override public String toString() {
-        return "Relation{" + "relName=" + relName + ", attrIndex=" + attrIndex +
-            ", numberOfTuples=" + numberOfTuples + ", tupleLength=" +
-            tupleLength + ", numberOfPartitions=" + numberOfPartitions + ", hashAttr=" + hashAttr
-            + '}';
-    }
+	/* standard methods */
+	@Override
+	public String toString() {
+		return "Relation{" + "relName=" + relName + ", attrIndex=" + attrIndex
+				+ ", numberOfTuples=" + numberOfTuples + ", tupleLength="
+				+ tupleLength + ", numberOfPartitions=" + numberOfPartitions
+				+ ", hashAttr=" + hashAttr + '}';
+	}
 
-    /*interface methods*/
-    //it keeps only essential projected attributes an eliminates the others. It also dicreases the tupleLength.
-    public void eliminteRedundantAttributes(Set<String> projections) {
-        Set<String> remove = new HashSet<String>();
+	/* interface methods */
+	// it keeps only essential projected attributes an eliminates the others. It
+	// also dicreases the tupleLength.
+	public void eliminteRedundantAttributes(Set<String> projections) {
+		Set<String> remove = new HashSet<String>();
 
-        for (String k : this.attrIndex.keySet()) {
-            if (!projections.contains(k))
-                remove.add(k);
-        }
+		for (String k : this.attrIndex.keySet()) {
+			if (!projections.contains(k))
+				remove.add(k);
+		}
 
-        for (String k : remove)
-            this.attrIndex.remove(k);
+		for (String k : remove)
+			this.attrIndex.remove(k);
 
-        //eliminate redudancy from hashing attributes set
-        //        for(String k : remove){
-        //            if(this.hashAttr.contains(k))
-        //                this.hashAttr.remove(k);
-        //        }
+		// eliminate redudancy from hashing attributes set
+		// for(String k : remove){
+		// if(this.hashAttr.contains(k))
+		// this.hashAttr.remove(k);
+		// }
 
-        refreshTupleLength();
-    }
+		refreshTupleLength();
+	}
 
+	public void adjustRelation(String attrName, Histogram h) {
+		// difference of the number of records between two tables
+		double recTableDiff;
+		// percentage of general increasing/decreasing of the rest histograms
+		double percentage;
+		double numOfTuples = h.numberOfTuples();
 
-    public void adjustRelation(String attrName, Histogram h) {
-        //difference of the number of records between two tables
-        double recTableDiff;
-        //percentage of general increasing/decreasing of the rest histograms
-        double percentage;
-        double numOfTuples = h.numberOfTuples();
+		for (AttrInfo attr : this.attrIndex.values()) {
+			if (!attr.getAttrName().equals(attrName)) {
+				recTableDiff = numOfTuples
+						- attr.getHistogram().numberOfTuples();
+				percentage = recTableDiff
+						/ attr.getHistogram().numberOfTuples();
+				if (Double.isInfinite(percentage)) {
+					percentage = Double.MAX_VALUE;
+				}
+				if (h.getBucketIndex().isEmpty()) {
+					for (AttrInfo attr2 : this.attrIndex.values()) {
+						attr2.getHistogram().getBucketIndex().clear();// ////////////////change
+																		// to
+																		// default
+																		// histogram
+					}
+					break;
+				} else {
+					for (Map.Entry<Double, Bucket> entry : attr.getHistogram()
+							.getBucketIndex().entrySet()) {
+						if (!entry.getValue().equals(
+								Bucket.FINAL_HISTOGRAM_BUCKET))
+							entry.getValue().setFrequency(
+									entry.getValue().getFrequency()
+											+ percentage
+											* entry.getValue().getFrequency());
+					}
+				}
+			}
+		}
 
-        for (AttrInfo attr : this.attrIndex.values()) {
-            if (!attr.getAttrName().equals(attrName)) {
-                recTableDiff = numOfTuples - attr.getHistogram().numberOfTuples();
-                percentage = recTableDiff / attr.getHistogram().numberOfTuples();
+		// fix new numberOfTUples variable when the histograms changes
+		this.numberOfTuples = numOfTuples;
+	}
 
-                if (h.getBucketIndex().isEmpty()) {
-                    for (AttrInfo attr2 : this.attrIndex.values()) {
-                        attr2.getHistogram().getBucketIndex()
-                            .clear();//////////////////change to default histogram
-                    }
-                    break;
-                } else {
-                    for (Map.Entry<Double, Bucket> entry : attr.getHistogram().
-                        getBucketIndex().entrySet()) {
-                        if (!entry.getValue().equals(Bucket.FINAL_HISTOGRAM_BUCKET))
-                            entry.getValue().setFrequency(
-                                entry.getValue().getFrequency() + percentage * entry.getValue()
-                                    .getFrequency());
-                    }
-                }
-            }
-        }
+	/* private-helper methods */
+	private void refreshTupleLength() {
+		int tl = 0;
+		
+		for (AttrInfo a : this.attrIndex.values()) {
+			if(a==null){
+				log.warn("null RelInfo");
+				return;
+			}
+			tl += a.getAttrLength();
+		}
 
-        //fix new numberOfTUples variable when the histograms changes
-        this.numberOfTuples = numOfTuples;
-    }
+		this.tupleLength = tl;
+	}
 
+	public void renameColumn(String oldName, String newName) {
+		attrIndex.put(newName, attrIndex.get(oldName));
+		attrIndex.remove(oldName);
 
-    /*private-helper methods*/
-    private void refreshTupleLength() {
-        int tl = 0;
-
-        for (AttrInfo a : this.attrIndex.values()) {
-            tl += a.getAttrLength();
-        }
-
-        this.tupleLength = tl;
-    }
-
+	}
 
 }

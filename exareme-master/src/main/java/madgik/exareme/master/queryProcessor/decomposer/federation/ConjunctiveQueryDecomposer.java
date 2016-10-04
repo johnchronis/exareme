@@ -12,10 +12,11 @@ import madgik.exareme.master.queryProcessor.decomposer.util.Util;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-
 
 //import di.madgik.statistics.planner.JoinExecutionAdvice;
 //import di.madgik.statistics.planner.StarPlanner;
@@ -30,68 +31,47 @@ import com.google.common.hash.HashCode;
 public class ConjunctiveQueryDecomposer {
 
 	private SQLQuery initialQuery;
-	private List<String> dbs;
 	private List<NonUnaryWhereCondition> remainingWhereConditions;
-	private ColumnsToTableNames<String> c2t;
 	private ColumnsToTableNames<Node> c2n;
-	private ArrayList<SQLQuery> result;
-	// private boolean singleTable = false;
-	private ArrayList<SQLQuery> nestedSubqueries;
+	private boolean checkForRangeJoins = true;
 	HashSet<Join> lj;
-	private boolean centralizedExecution;
-	// private boolean mergeSelections;
-	// private static int counter=0;
-	private static final Logger log = Logger
-			.getLogger(ConjunctiveQueryDecomposer.class);
+	private static final boolean useGreedy = DecomposerUtils.USE_GREEDY;
+	private static int counter = 0;
+	private static final Logger log = Logger.getLogger(ConjunctiveQueryDecomposer.class);
+	private List<NonUnaryWhereCondition> rangeJoins;
 
-	public ConjunctiveQueryDecomposer(SQLQuery initial, boolean centralized,
-			boolean addRedundantIsNotNull) {
+	public ConjunctiveQueryDecomposer(SQLQuery initial, boolean centralized, boolean addRedundantIsNotNull) {
 		this.initialQuery = initial;
-		this.dbs = new ArrayList<String>();
 		this.lj = new HashSet<Join>();
 		this.remainingWhereConditions = new ArrayList<NonUnaryWhereCondition>();
-		this.nestedSubqueries = new ArrayList<SQLQuery>();
 		/*
 		 * for (Table t : initialQuery.getInputTables()) { if (t.isFederated())
 		 * { this.initialQuery.setFederated(true); if
 		 * (!dbs.contains(t.getDBName())) { dbs.add(t.getDBName()); } } }
 		 */
-		for (NonUnaryWhereCondition bwc : initialQuery
-				.getBinaryWhereConditions()) {
+		for (NonUnaryWhereCondition bwc : initialQuery.getBinaryWhereConditions()) {
 			this.remainingWhereConditions.add(bwc);
 		}
-		this.centralizedExecution = centralized;
 		if (addRedundantIsNotNull) {
-			for (int i = 0; i < this.initialQuery.getUnaryWhereConditions()
-					.size(); i++) {
-				UnaryWhereCondition uwc = this.initialQuery
-						.getUnaryWhereConditions().get(i);
-				if (uwc.getNot()
-						&& uwc.getType() == UnaryWhereCondition.IS_NULL) {
+			for (int i = 0; i < this.initialQuery.getUnaryWhereConditions().size(); i++) {
+				UnaryWhereCondition uwc = this.initialQuery.getUnaryWhereConditions().get(i);
+				if (uwc.getNot() && uwc.getType() == UnaryWhereCondition.IS_NULL) {
 					Column c = uwc.getAllColumnRefs().get(0);
-					for (NonUnaryWhereCondition nuwc : this.initialQuery
-							.getBinaryWhereConditions()) {
+					for (NonUnaryWhereCondition nuwc : this.initialQuery.getBinaryWhereConditions()) {
 						if (nuwc.getOperator().equals("=")) {
 							Column other = null;
-							if (nuwc.getLeftOp().equals(c)
-									&& nuwc.getRightOp() instanceof Column) {
+							if (nuwc.getLeftOp().equals(c) && nuwc.getRightOp() instanceof Column) {
 								other = (Column) nuwc.getRightOp();
 							}
-							if (nuwc.getRightOp().equals(c)
-									&& nuwc.getLeftOp() instanceof Column) {
+							if (nuwc.getRightOp().equals(c) && nuwc.getLeftOp() instanceof Column) {
 								other = (Column) nuwc.getLeftOp();
 							}
 							if (other != null) {
 								try {
-									UnaryWhereCondition toAdd = new UnaryWhereCondition(
-											UnaryWhereCondition.IS_NULL,
+									UnaryWhereCondition toAdd = new UnaryWhereCondition(UnaryWhereCondition.IS_NULL,
 											other.clone(), true);
-									if (!this.initialQuery
-											.getUnaryWhereConditions()
-											.contains(toAdd)) {
-										this.initialQuery
-												.getUnaryWhereConditions().add(
-														toAdd);
+									if (!this.initialQuery.getUnaryWhereConditions().contains(toAdd)) {
+										this.initialQuery.getUnaryWhereConditions().add(toAdd);
 									}
 								} catch (CloneNotSupportedException ex) {
 									log.error(ex.getMessage());
@@ -102,95 +82,186 @@ public class ConjunctiveQueryDecomposer {
 				}
 			}
 		}
-
+		counter++;
 	}
 
-	public Node addCQToDAG(Node root, NodeHashValues hashes) {
+	public Node addCQToDAG(Node root, NodeHashValues hashes) throws SQLException {
 
 		// columnsToSubqueries tracks from which temporary table we take each
 		// column of the initial query
 		c2n = new ColumnsToTableNames<Node>();
 
-		// else we have only one DB, for each table make a subquery
-		// else {
-		Node last = null;
-		for (Table t : this.initialQuery.getInputTables()) {
-			Node table = new Node(Node.OR);
-			table.addDescendantBaseTable(t.getAlias());
+		
 
-			table.setObject(t);
-			if (!hashes.containsKey(table.getHashId())) {
-
-				// table.setHashID(Objects.hash(t.getName()));
-				// table.setIsBaseTable(true);
-				hashes.put(table.getHashId(), table);
-			} else {
-				table = hashes.get(table.getHashId());
+		if (initialQuery.getJoinNode() != null) {
+			for(String alias:initialQuery.getJoinNode().getDescendantBaseTables()){
+				c2n.addTable(alias, initialQuery.getJoinNode());
 			}
-			last = table;
-			ArrayList<String> dummy = new ArrayList<String>();
-			dummy.add(t.getAlias());
-			SQLQuery s = createSubqueriesForTables(dummy, "");
-
-			Node selection = new Node(Node.AND, Node.SELECT);
-			Selection sel = new Selection();
-			for (UnaryWhereCondition uwc : s.getUnaryWhereConditions()) {
-
-				sel.addOperand(uwc);
+			
+			for (int i = 0; i < initialQuery.getInputTables().size(); i++) {
+				if (initialQuery.getJoinNode().getDescendantBaseTables()
+						.contains(initialQuery.getInputTables().get(i).getAlias())) {
+					initialQuery.getInputTables().remove(i);
+					i--;
+				}
 			}
-			for (NonUnaryWhereCondition bwc : s.getBinaryWhereConditions()) {
+			//Node tempParent=null;
+			if(!initialQuery.getInputTables().isEmpty()){
+				log.debug("left join with more tables in the same query");
+			for (Table t : this.initialQuery.getInputTables()) {
+				makeNodeForTable(t, c2n, hashes);
 
-				sel.addOperand(bwc);
 			}
-			if (sel.getOperands().size() > 0) {
+			Node tempParent=addRemainingJoins(c2n, hashes, null, root, false);
+			root.addChild(tempParent);
+			return tempParent; }
+			else{
+				Node tempParent = makeNodeFinal(initialQuery.getJoinNode(), hashes);
+				
+				if (useGreedy) {
+					tempParent.addUnionToDesc(counter);
+				}
+				// String a=tempParent.dotPrint();
+				Selection s = new Selection();
+				if (!initialQuery.getBinaryWhereConditions().isEmpty()) {
 
-				selection.addChild(table);
-				// selection.setPartitionRecord(table.getPartitionRecord());
-				// selection.setLastPartition(table.getLastPartition());
-				selection.setObject(sel);
-				if (!hashes.containsKey(selection.getHashId())) {
-					hashes.put(selection.getHashId(), selection);
-					selection.addDescendantBaseTable(t.getAlias());
-					// selection.addChild(table);
+					for (NonUnaryWhereCondition nuwc : initialQuery.getBinaryWhereConditions()) {
+						s.addOperand(nuwc);
+					}
+				}
+				if (!initialQuery.getUnaryWhereConditions().isEmpty()) {
 
+					for (UnaryWhereCondition uwc : initialQuery.getUnaryWhereConditions()) {
+						s.addOperand(uwc);
+					}
+				}
+				if(!s.getOperands().isEmpty()){
+					Node selNode=new Node(Node.AND, Node.SELECT);
+					selNode.setObject(s);
+					selNode.addChild(tempParent);
+					selNode.addAllDescendantBaseTables(tempParent.getDescendantBaseTables());
+					if (!hashes.containsKey(selNode.getHashId())) {
+
+						// table.setHashID(Objects.hash(t.getName()));
+						// table.setIsBaseTable(true);
+						hashes.put(selNode.getHashId(), selNode);
+					} else {
+						selNode = hashes.get(selNode.getHashId());
+					}
+					Node table = new Node(Node.OR);
+					Table t = new Table("table" + Util.createUniqueId(), null);
+					table.setObject(t);
+					table.addChild(selNode);
+					// table.setPartitionRecord(groupBy.getPartitionRecord());
+					// table.setLastPartition(groupBy.getLastPartition());
+
+					// groupBy.setPartitionRecord(n.getPartitionRecord());
+					// groupBy.setPartitionRecord(n.getPartitionRecord());
+					if (!hashes.containsKey(table.getHashId())) {
+						hashes.put(table.getHashId(), table);
+						table.addAllDescendantBaseTables(selNode.getDescendantBaseTables());
+					} else {
+						table = hashes.get(table.getHashId());
+					}
+					tempParent = table;
+				}
+				root.addChild(tempParent);
+				return tempParent;
+			}
+			/*makeNodeFinal(initialQuery.getJoinNode(), hashes);
+
+			if (useGreedy) {
+			tempParent.addUnionToDesc(counter);
+			}
+			Selection s = new Selection();
+			if (!initialQuery.getBinaryWhereConditions().isEmpty()) {
+
+				for (NonUnaryWhereCondition nuwc : initialQuery.getBinaryWhereConditions()) {
+					s.addOperand(nuwc);
+				}
+			}
+			if (!initialQuery.getUnaryWhereConditions().isEmpty()) {
+
+				for (UnaryWhereCondition uwc : initialQuery.getUnaryWhereConditions()) {
+					s.addOperand(uwc);
+				}
+			}
+			if (!s.getOperands().isEmpty()) {
+				Node selNode = new Node(Node.AND, Node.SELECT);
+				selNode.setObject(s);
+				selNode.addChild(tempParent);
+				selNode.addAllDescendantBaseTables(tempParent.getDescendantBaseTables());
+				if (!hashes.containsKey(selNode.getHashId())) {
+
+					// table.setHashID(Objects.hash(t.getName()));
+					// table.setIsBaseTable(true);
+					hashes.put(selNode.getHashId(), selNode);
 				} else {
-					selection = hashes.get(selection.getHashId());
+					selNode = hashes.get(selNode.getHashId());
 				}
+				Node table = new Node(Node.OR);
+				Table t = new Table("table" + Util.createUniqueId(), null);
+				table.setObject(t);
+				table.addChild(selNode);
+				// table.setPartitionRecord(groupBy.getPartitionRecord());
+				// table.setLastPartition(groupBy.getLastPartition());
 
-				Node selTable = new Node(Node.OR);
-
-				Table selt = new Table("table" + Util.createUniqueId(), null);
-				selTable.setObject(selt);
-				selTable.addChild(selection);
-
-				if (!hashes.containsKey(selTable.getHashId())) {
-					selTable.addDescendantBaseTable(t.getAlias());
-					hashes.put(selTable.getHashId(), selTable);
-					// selection.addChild(table);
-
+				// groupBy.setPartitionRecord(n.getPartitionRecord());
+				// groupBy.setPartitionRecord(n.getPartitionRecord());
+				if (!hashes.containsKey(table.getHashId())) {
+					hashes.put(table.getHashId(), table);
+					table.addAllDescendantBaseTables(selNode.getDescendantBaseTables());
 				} else {
-					selTable = hashes.get(selTable.getHashId());
-
+					table = hashes.get(table.getHashId());
 				}
-				last = selTable;
-
-				for (Column cl : s.getAllColumns()) {
-					c2n.putColumnInTable(cl, selTable);
-					// add projections
-
-				}
-			} else {
-				for (Column cl : s.getAllColumns()) {
-					c2n.putColumnInTable(cl, table);
-					// add projections
-
-				}
+				tempParent = table;
 			}
+			root.addChild(tempParent);
+			return tempParent;*/
 
 		}
 
-		for (SQLQuery nested : this.initialQuery.getNestedSelectSubqueries()
-				.keySet()) {
+		// else we have only one DB, for each table make a subquery
+		// else {
+		Node last = null;
+
+		boolean checkToRemoveReduntantJoins = false;
+		if (checkToRemoveReduntantJoins && root.getOpCode() == Node.UNION) {
+			Map<String, Boolean> tbleHashOnlyOneCol = new HashMap<String, Boolean>();
+			for (Column c : initialQuery.getAllColumns()) {
+				if (tbleHashOnlyOneCol.containsKey(c.getAlias())) {
+					tbleHashOnlyOneCol.put(c.getAlias(), false);
+				} else {
+					tbleHashOnlyOneCol.put(c.getAlias(), true);
+				}
+			}
+			for (String s : tbleHashOnlyOneCol.keySet()) {
+				if (tbleHashOnlyOneCol.get(s)) {
+					for (NonUnaryWhereCondition join : initialQuery.getBinaryWhereConditions()) {
+						if (join.getLeftOp() instanceof Column && join.getRightOp() instanceof Column
+								&& join.getOperator().equals("=")) {
+							Column left = (Column) join.getLeftOp();
+							Column right = (Column) join.getRightOp();
+							if (left.getName().equals(right.getName())) {
+								if (left.getAlias().equals(s)) {
+
+								}
+								if (right.getAlias().equals(s)) {
+
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for (Table t : this.initialQuery.getInputTables()) {
+			last = makeNodeForTable(t, c2n, hashes);
+
+		}
+
+		for (SQLQuery nested : this.initialQuery.getNestedSelectSubqueries().keySet()) {
 			String alias = this.initialQuery.getNestedSubqueryAlias(nested);
 			Node table = nested.getNestedNode();
 			last = table;
@@ -285,37 +356,137 @@ public class ConjunctiveQueryDecomposer {
 				}
 				Node tempParent = makeNodeFinal(last, hashes);
 				root.addChild(tempParent);
+				if (useGreedy) {
+					tempParent.addUnionToDesc(counter);
+				}
 				return tempParent;
 			}
 
 		}
 
+		if (this.checkForRangeJoins) {
+			Map<Set<String>, Set<NonUnaryWhereCondition>> joinsForTablesWithInequality = new HashMap<Set<String>, Set<NonUnaryWhereCondition>>();
+			for (NonUnaryWhereCondition bwc : this.remainingWhereConditions) {
+				if (bwc.getOperator().contains(">") || bwc.getOperator().contains("<")) {
+					Set<String> ts = new HashSet<String>(2);
+					ts.add(bwc.getLeftOp().getAllColumnRefs().get(0).getAlias());
+					ts.add(bwc.getRightOp().getAllColumnRefs().get(0).getAlias());
+					if (!joinsForTablesWithInequality.containsKey(ts)) {
+						joinsForTablesWithInequality.put(ts, new HashSet<NonUnaryWhereCondition>());
+					}
+					joinsForTablesWithInequality.get(ts).add(bwc);
+				}
+			}
+			for (Set<NonUnaryWhereCondition> filters : joinsForTablesWithInequality.values()) {
+				for (NonUnaryWhereCondition f : filters) {
+					remainingWhereConditions.remove(f);
+				}
+			}
+			if (!joinsForTablesWithInequality.isEmpty()) {
+				for (NonUnaryWhereCondition bwc : this.remainingWhereConditions) {
+					if (bwc.getOperator().equals("=")) {
+						Set<String> ts = new HashSet<String>(2);
+						ts.add(bwc.getLeftOp().getAllColumnRefs().get(0).getAlias());
+						ts.add(bwc.getRightOp().getAllColumnRefs().get(0).getAlias());
+						if (joinsForTablesWithInequality.containsKey(ts)) {
+							bwc.createFilterJoins();
+							for (NonUnaryWhereCondition rangeJoinsForTable : joinsForTablesWithInequality.get(ts)) {
+								bwc.addFilterJoin(rangeJoinsForTable);
+							}
+							joinsForTablesWithInequality.remove(ts);
+						}
+
+					}
+				}
+			}
+			if (!joinsForTablesWithInequality.isEmpty()) {
+				rangeJoins=new ArrayList<NonUnaryWhereCondition>();
+				for (Set<NonUnaryWhereCondition> filters : joinsForTablesWithInequality.values()) {
+					for (NonUnaryWhereCondition f : filters) {
+						remainingWhereConditions.add(f);
+						rangeJoins.add(f);
+					}
+				}
+
+			}
+		}
+
+		return addRemainingJoins(c2n, hashes, joinSets, root, true);
+	}
+
+	private Node addRemainingJoins(ColumnsToTableNames<Node> c2n2, NodeHashValues hashes, List<Set<String>> joinSets, Node root, boolean useJoinSets) throws SQLException {
 		while (!this.remainingWhereConditions.isEmpty()) {
 			NonUnaryWhereCondition bwc = this.remainingWhereConditions.get(0);
-			mergeJoinSets(joinSets, bwc);
+			boolean addRangeJoins=true;
+			if(addRangeJoins&&rangeJoins!=null){
+				for(NonUnaryWhereCondition range:rangeJoins){
+					//make sure that all columns for each operand come from the same node
+					boolean allColumnComeFromSameNode=true;
+				Node lchild = c2n.getTablenameForColumn(range.getLeftOp().getAllColumnRefs().get(0));
+				for(int i=1;i<range.getLeftOp().getAllColumnRefs().size();i++){
+					if(!c2n.getTablenameForColumn(range.getLeftOp().getAllColumnRefs().get(i)).getObject().equals(lchild.getObject())){
+						allColumnComeFromSameNode=false;
+						break;
+					}
+				}
+				if(!allColumnComeFromSameNode){
+					continue;
+				}
+				Node rchild = c2n.getTablenameForColumn(range.getRightOp().getAllColumnRefs().get(0));
+				for(int i=1;i<range.getRightOp().getAllColumnRefs().size();i++){
+					//Node llll=c2n.getTablenameForColumn(range.getRightOp().getAllColumnRefs().get(i));
+					if(!c2n.getTablenameForColumn(range.getRightOp().getAllColumnRefs().get(i)).getObject().equals(rchild.getObject())){
+						allColumnComeFromSameNode=false;
+						break;
+					}
+				}
+				if(!allColumnComeFromSameNode)
+				{
+					continue;
+				}
+				rangeJoins.remove(range);
+				bwc=range;
+				break;
+				}
+				
+			}
+			
+			if(useJoinSets){
+				mergeJoinSets(joinSets, bwc);
+			}
 			Node join = new Node(Node.AND, Node.JOIN);
 			join.setObject(bwc);
 
-			if (bwc.getLeftOp() instanceof Column
-					&& bwc.getRightOp() instanceof Column) {
-				Node lchild = c2n.getTablenameForColumn((Column) bwc
-						.getLeftOp());
+			if (bwc.getLeftOp() instanceof Column && bwc.getRightOp() instanceof Column) {
+				Node lchild = c2n.getTablenameForColumn( bwc.getLeftOp().getAllColumnRefs().get(0));
 				join.addChild(lchild);
-				join.addAllDescendantBaseTables(lchild
-						.getDescendantBaseTables());
+				join.addAllDescendantBaseTables(lchild.getDescendantBaseTables());
 
-				Node rchild = c2n.getTablenameForColumn((Column) bwc
-						.getRightOp());
+				Node rchild = c2n.getTablenameForColumn((Column) bwc.getRightOp().getAllColumnRefs().get(0));
 				join.addChild(rchild);
-				join.addAllDescendantBaseTables(rchild
-						.getDescendantBaseTables());
+				join.addAllDescendantBaseTables(rchild.getDescendantBaseTables());
 
 			} else {
 
 				log.error(bwc.toString() + ":operand not Column");
+				Node lchild = c2n.getTablenameForColumn( bwc.getLeftOp().getAllColumnRefs().get(0));
+				join.addChild(lchild);
+				join.addAllDescendantBaseTables(lchild.getDescendantBaseTables());
+
+				Node rchild = c2n.getTablenameForColumn((Column) bwc.getRightOp().getAllColumnRefs().get(0));
+				join.addChild(rchild);
+				join.addAllDescendantBaseTables(rchild.getDescendantBaseTables());
 
 			}
-			HashCode hc=join.getHashId();
+			if (bwc.getOperator().contains(">") || bwc.getOperator().contains(">")) {
+				if (join.getChildren().size() == 2) {
+					log.warn("Query contains range join:" + remainingWhereConditions.toString() + ". "
+							+ "Switching to centralized execution.");
+					hashes.setContainsRangeJoin(true);
+				}
+			}
+
+			HashCode hc = join.getHashId();
 			if (!hashes.containsKey(hc)) {
 				hashes.put(join.getHashId(), join);
 			} else {
@@ -328,7 +499,7 @@ public class ConjunctiveQueryDecomposer {
 			table.setObject(t);
 			table.addChild(join);
 			// table.setIsCentralised(tableIsCentralised);
-			hc=table.getHashId();
+			hc = table.getHashId();
 			if (!hashes.containsKey(hc)) {
 				hashes.put(table.getHashId(), table);
 				table.addAllDescendantBaseTables(join.getDescendantBaseTables());
@@ -342,17 +513,16 @@ public class ConjunctiveQueryDecomposer {
 			// ConcurrentHashMap();
 
 			// for (Node toChange : join.getChildren()) {
-			c2n.changeColumns(
-					c2n.getTablenameForColumn((Column) bwc.getLeftOp()), table);
-			c2n.changeColumns(
-					c2n.getTablenameForColumn((Column) bwc.getRightOp()), table);
+			c2n.changeColumns(c2n.getTablenameForColumn(bwc.getLeftOp().getAllColumnRefs().get(0)), table);
+			c2n.changeColumns(c2n.getTablenameForColumn( bwc.getRightOp().getAllColumnRefs().get(0)), table);
 			// }
 
 			if (remainingWhereConditions.size() == 1) {
-				if (joinSets.size() > 1) {
+				if (useJoinSets&&joinSets.size() > 1) {
 					NonUnaryWhereCondition toAdd = addConditionsFromConstants();
 					if (toAdd == null) {
 						log.error("Input query contains cartesian product. Currently not supported");
+						throw new SQLException("Input query contains cartesian product. Currently not supported");
 
 					} else {
 						this.initialQuery.getBinaryWhereConditions().add(toAdd);
@@ -361,12 +531,15 @@ public class ConjunctiveQueryDecomposer {
 				} else {
 					Node tempParent = makeNodeFinal(table, hashes);
 					root.addChild(tempParent);
+					if (useGreedy) {
+						tempParent.addUnionToDesc(counter);
+					}
 					return tempParent;
 				}
 
 			}
 
-			this.remainingWhereConditions.remove(0);
+			this.remainingWhereConditions.remove(bwc);
 
 		}
 
@@ -374,27 +547,97 @@ public class ConjunctiveQueryDecomposer {
 		// return result;
 	}
 
+	private Node makeNodeForTable(Table t, ColumnsToTableNames<Node> c2n2, NodeHashValues hashes) {
+		Node table = new Node(Node.OR);
+		table.addDescendantBaseTable(t.getAlias());
+
+		table.setObject(t);
+		if (!hashes.containsKey(table.getHashId())) {
+
+			// table.setHashID(Objects.hash(t.getName()));
+			// table.setIsBaseTable(true);
+			hashes.put(table.getHashId(), table);
+		} else {
+			table = hashes.get(table.getHashId());
+		}
+		Node last = table;
+		ArrayList<String> dummy = new ArrayList<String>();
+		dummy.add(t.getAlias());
+		SQLQuery s = createSubqueriesForTables(dummy, "");
+
+		Node selection = new Node(Node.AND, Node.SELECT);
+		Selection sel = new Selection();
+		for (UnaryWhereCondition uwc : s.getUnaryWhereConditions()) {
+
+			sel.addOperand(uwc);
+		}
+		for (NonUnaryWhereCondition bwc : s.getBinaryWhereConditions()) {
+
+			sel.addOperand(bwc);
+		}
+		if (sel.getOperands().size() > 0) {
+
+			selection.addChild(table);
+			// selection.setPartitionRecord(table.getPartitionRecord());
+			// selection.setLastPartition(table.getLastPartition());
+			selection.setObject(sel);
+			if (!hashes.containsKey(selection.getHashId())) {
+				hashes.put(selection.getHashId(), selection);
+				selection.addDescendantBaseTable(t.getAlias());
+				// selection.addChild(table);
+
+			} else {
+				selection = hashes.get(selection.getHashId());
+			}
+
+			Node selTable = new Node(Node.OR);
+
+			Table selt = new Table("table" + Util.createUniqueId(), null);
+			selTable.setObject(selt);
+			selTable.addChild(selection);
+
+			if (!hashes.containsKey(selTable.getHashId())) {
+				selTable.addDescendantBaseTable(t.getAlias());
+				hashes.put(selTable.getHashId(), selTable);
+				// selection.addChild(table);
+
+			} else {
+				selTable = hashes.get(selTable.getHashId());
+
+			}
+			last = selTable;
+
+			for (Column cl : s.getAllColumns()) {
+				c2n.putColumnInTable(cl, selTable);
+				// add projections
+
+			}
+		} else {
+			for (Column cl : s.getAllColumns()) {
+				c2n.putColumnInTable(cl, table);
+				// add projections
+
+			}
+		}
+		return last;
+	}
+
 	private NonUnaryWhereCondition addConditionsFromConstants() {
 		NonUnaryWhereCondition result = null;
 		for (int i = 0; i < this.initialQuery.getBinaryWhereConditions().size(); i++) {
-			NonUnaryWhereCondition nuwc = this.initialQuery
-					.getBinaryWhereConditions().get(i);
+			NonUnaryWhereCondition nuwc = this.initialQuery.getBinaryWhereConditions().get(i);
 			if (nuwc.getOperator().equals("=")
-					&& (nuwc.getLeftOp() instanceof Constant || nuwc
-							.getRightOp() instanceof Constant)) {
-				Constant c = nuwc.getLeftOp() instanceof Constant ? (Constant) nuwc
-						.getLeftOp() : (Constant) nuwc.getRightOp();
+					&& (nuwc.getLeftOp() instanceof Constant || nuwc.getRightOp() instanceof Constant)) {
+				Constant c = nuwc.getLeftOp() instanceof Constant ? (Constant) nuwc.getLeftOp()
+						: (Constant) nuwc.getRightOp();
 				Operand o = nuwc.getLeftOp();
 				if (o.equals(c)) {
 					o = nuwc.getRightOp();
 				}
-				for (int j = i + 1; j < this.initialQuery
-						.getBinaryWhereConditions().size(); j++) {
-					NonUnaryWhereCondition nuwc2 = this.initialQuery
-							.getBinaryWhereConditions().get(j);
+				for (int j = i + 1; j < this.initialQuery.getBinaryWhereConditions().size(); j++) {
+					NonUnaryWhereCondition nuwc2 = this.initialQuery.getBinaryWhereConditions().get(j);
 					if (nuwc2.getOperator().equals("=")
-							&& (nuwc2.getLeftOp().equals(c) || nuwc2
-									.getRightOp().equals(c))) {
+							&& (nuwc2.getLeftOp().equals(c) || nuwc2.getRightOp().equals(c))) {
 						Operand o2 = nuwc2.getLeftOp();
 						if (o2.equals(c)) {
 							o2 = nuwc2.getRightOp();
@@ -407,11 +650,8 @@ public class ConjunctiveQueryDecomposer {
 						reverse.addOperand(o2);
 						reverse.addOperand(o);
 						reverse.setOperator("=");
-						if (!this.initialQuery.getBinaryWhereConditions()
-								.contains(result)
-								&& !this.initialQuery
-										.getBinaryWhereConditions().contains(
-												reverse)) {
+						if (!this.initialQuery.getBinaryWhereConditions().contains(result)
+								&& !this.initialQuery.getBinaryWhereConditions().contains(reverse)) {
 							return result;
 						}
 					}
@@ -421,8 +661,7 @@ public class ConjunctiveQueryDecomposer {
 		return null;
 	}
 
-	private void mergeJoinSets(List<Set<String>> joinSets,
-			NonUnaryWhereCondition bwc) {
+	private void mergeJoinSets(List<Set<String>> joinSets, NonUnaryWhereCondition bwc) {
 		String l = bwc.getLeftOp().getAllColumnRefs().get(0).getAlias();
 		String r = bwc.getRightOp().getAllColumnRefs().get(0).getAlias();
 		;
@@ -456,350 +695,7 @@ public class ConjunctiveQueryDecomposer {
 		}
 	}
 
-	public ArrayList<SQLQuery> getSubqueries() {
-
-		// columnsToSubqueries tracks from which temporary table we take each
-		// column of the initial query
-		c2t = new ColumnsToTableNames<String>();
-
-		for (Column initialQueryColumn : this.initialQuery.getAllColumns()) {
-			c2t.putColumnInTable(initialQueryColumn,
-					initialQuery.getResultTableName());
-		}
-		// track columns from nested select subqueries
-		for (SQLQuery nested : this.initialQuery.getNestedSubqueries()) {
-			this.nestedSubqueries.add(nested);
-			for (String alias : nested.getOutputAliases()) {
-				c2t.putColumnInTable(
-						new Column(this.initialQuery
-								.getNestedSubqueryAlias(nested), alias), nested
-								.getResultTableName());
-			}
-		}
-
-		result = new ArrayList<SQLQuery>();
-
-		if (initialQuery.getInputTables().size() == 1
-				&& !initialQuery.hasNestedSuqueriesOrLeftJoin()) {
-			// return initial as only subquery
-			if (this.initialQuery.isFederated()) {
-
-				for (Table t : initialQuery.getInputTables()) {
-
-					if (!t.hasDBIdRemoved()) {
-						t.setName(t.getlocalName());
-						t.setDBIdRemoved();
-					}
-					t.removeDBIdFromAlias();
-
-					initialQuery.setMadisFunctionString(DBInfoReaderDB.dbInfo
-							.getDB(dbs.get(0)).getMadisString());
-					this.initialQuery.setTemporary(false);
-					if (result.isEmpty()) {
-						renameOutputColumnsInNestedSubs();
-					}
-					result.add(this.initialQuery);
-
-				}
-
-			} else {
-				this.initialQuery.setTemporary(false);
-				if (result.isEmpty()) {
-					renameOutputColumnsInNestedSubs();
-				}
-				result.add(initialQuery);
-			}
-			return result;
-		} else if (dbs.size() > 0 && this.initialQuery.isFederated()) {
-			// we have more than one dbs. break the query into queries that can
-			// be executed in only one db
-			for (String db : dbs) {
-				SQLQuery s = createSubqueryFromDB(db);
-				if (result.isEmpty()) {
-					renameOutputColumnsInNestedSubs();
-				}
-				result.add(s);
-				for (Column c : s.getAllOutputColumns()) {
-					c2t.putColumnInTable(c, s.getResultTableName());
-				}
-			}
-
-		} // else we have only one DB, for each table make a subquery
-		else {
-			for (Table t : this.initialQuery.getInputTables()) {
-				ArrayList<String> dummy = new ArrayList<String>();
-				dummy.add(t.getAlias());
-				SQLQuery s = createSubqueriesForTables(dummy, "");
-				if (result.isEmpty()) {
-					renameOutputColumnsInNestedSubs();
-				}
-				result.add(s);
-				for (Column c : s.getAllOutputColumns()) {
-					c2t.putColumnInTable(c, s.getResultTableName());
-				}
-			}
-		}
-
-		if (this.remainingWhereConditions.isEmpty()) {
-			if (this.result.size() > 1) {
-				// CARTESIAN PRODUCT!!!!
-				SQLQuery cartesianSubquery = new SQLQuery();
-				for (SQLQuery q : this.result) {
-					cartesianSubquery.getInputTables().add(
-							new Table(q.getResultTableName(), ""));
-				}
-				makeSubqueryFinal(cartesianSubquery);
-				for (SQLQuery previous : result) {
-					previous.setTemporary(true);
-				}
-				result.add(cartesianSubquery);
-
-			}
-			return result;
-		}
-
-		// we have a query with more than one join, we must rearrange them using
-		// the optimizer
-
-		if (this.centralizedExecution) {
-			SQLQuery joinSubquery = new SQLQuery();
-			// result.add(joinSubquery);
-			while (!this.remainingWhereConditions.isEmpty()) {
-				NonUnaryWhereCondition bwc = this.remainingWhereConditions
-						.get(0);
-
-				// change the tables in the columns of the condition to be
-				// tracked from previous subqueries
-				for (Column otherColumn : c2t.getAllColumns()) {
-					for (Column c : bwc.getAllColumnRefs()) {
-						if (otherColumn.equals(c)) {
-							SQLQuery temporarySubquery = getTemporarySubquery(c2t
-									.getTablenameForColumn(otherColumn));
-							if (temporarySubquery != null) {
-
-								if (!joinSubquery.getInputTables().contains(
-										new Table(temporarySubquery
-												.getResultTableName(), ""))) {
-									joinSubquery.getInputTables().add(
-											new Table(temporarySubquery
-													.getResultTableName(), ""));
-									for (Output o : temporarySubquery
-											.getOutputs()) {
-										// if (o.getObject() instanceof Column)
-										// {
-										Column toadd = new Column(
-												temporarySubquery
-														.getResultTableName(),
-												o.getOutputName());
-										joinSubquery.getOutputs().add(
-												new Output(o.getOutputName(),
-														toadd));
-
-									}
-								}
-							}
-						}
-					}
-				}
-
-				// change columns according to columnsToSubqueries
-				// ConcurrentHashMap<Column, Column> changePairs = new
-				// ConcurrentHashMap();
-				List<Column> allRefs = bwc.getAllColumnRefs();
-				Column[] olds = new Column[allRefs.size()];
-				Column[] news = new Column[allRefs.size()];
-
-				for (int i = 0; i < allRefs.size(); i++) {
-					Column c = allRefs.get(i);
-					Column toChange = new Column(c2t.getTablenameForColumn(c),
-							c.getAlias() + "_" + c.getName());
-					olds[i] = c;
-					news[i] = toChange;
-					// changePairs.put(c, toChange);
-				}
-				for (int j = 0; j < olds.length; j++) {
-					// for (Column old : changePairs.keySet()) {
-					for (int i = 0; i < bwc.getOperands().size(); i++) {
-						Operand o = bwc.getOperands().get(i);
-						if (o instanceof Column) {
-							if (((Column) o).equals(olds[j])) {
-								bwc.setOperandAt(i, news[j]);
-							}
-						} else {
-							o.changeColumn(olds[j], news[j]);
-						}
-					}
-				}
-				joinSubquery.getBinaryWhereConditions().add(bwc);
-
-				// change columns according to columnsToSubqueries
-
-				if (remainingWhereConditions.size() == 1) {
-					// this was the last where condition
-					makeSubqueryFinal(joinSubquery);
-					if (result.isEmpty()) {
-						renameOutputColumnsInNestedSubs();
-					}
-					result.add(joinSubquery);
-					return result;
-				}
-				this.remainingWhereConditions.remove(0);
-
-			}
-
-		}
-
-		while (!this.remainingWhereConditions.isEmpty()) {
-			NonUnaryWhereCondition bwc = this.remainingWhereConditions.get(0);
-
-			SQLQuery joinSubquery = new SQLQuery();
-			// change the tables in the columns of the condition to be tracked
-			// from previous subqueries
-			for (Column otherColumn : c2t.getAllColumns()) {
-				for (Column c : bwc.getAllColumnRefs()) {
-					if (otherColumn.equals(c)) {
-						SQLQuery temporarySubquery = getTemporarySubquery(c2t
-								.getTablenameForColumn(otherColumn));
-						// temporarySubquery.setPartitioningOnColum(new
-						// Column(null, c.tableAlias + "_" + c.columnName));
-						// Column c2 = new
-						// Column(temporarySubquery.getResultTableName(), "");
-						if (!joinSubquery.getInputTables().contains(
-								new Table(temporarySubquery
-										.getResultTableName(), ""))) {
-							joinSubquery.getInputTables().add(
-									new Table(temporarySubquery
-											.getResultTableName(), ""));
-							for (Output o : temporarySubquery.getOutputs()) {
-								// if (o.getObject() instanceof Column) {
-								Column toadd = new Column(
-										temporarySubquery.getResultTableName(),
-										o.getOutputName());
-								joinSubquery.getOutputs().add(
-										new Output(o.getOutputName(), toadd));
-								// } else {
-
-								// System.out.print("OOOOOOOOOOOOO"+o.toString());
-								// TODO?
-								// }
-								// if (o.getOutputName().equals(c.tableAlias +
-								// "_" + c.columnName)) {
-								// c2.columnName = o.getOutputName();
-								// joinSubquery.outputs.add(new
-								// Output(o.getOutputName(), c2));
-
-								// }
-							}
-						}
-					}
-				}
-			}
-
-			// change columns according to columnsToSubqueries
-			// ConcurrentHashMap<Column, Column> changePairs = new
-			// ConcurrentHashMap();
-			List<Column> allRefs = bwc.getAllColumnRefs();
-			Column[] olds = new Column[allRefs.size()];
-			Column[] news = new Column[allRefs.size()];
-
-			for (int i = 0; i < allRefs.size(); i++) {
-				Column c = allRefs.get(i);
-				Column toChange = new Column(c2t.getTablenameForColumn(c),
-						c.getAlias() + "_" + c.getName());
-				olds[i] = c;
-				news[i] = toChange;
-				// changePairs.put(c, toChange);
-			}
-			for (int j = 0; j < olds.length; j++) {
-				// for (Column old : changePairs.keySet()) {
-				for (int i = 0; i < bwc.getOperands().size(); i++) {
-					Operand o = bwc.getOperands().get(i);
-					if (o instanceof Column) {
-						if (((Column) o).equals(olds[j])) {
-							bwc.setOperandAt(i, news[j]);
-						}
-					} else {
-						o.changeColumn(olds[j], news[j]);
-					}
-				}
-			}
-			joinSubquery.getBinaryWhereConditions().add(bwc);
-
-			// change columns according to columnsToSubqueries
-
-			if (remainingWhereConditions.size() == 1) {
-				// this was the last where condition
-				makeSubqueryFinal(joinSubquery);
-				result.add(joinSubquery);
-				return result;
-			}
-			this.remainingWhereConditions.remove(0);
-			// alter columns of the initial query that must be tracked from this
-			// subquery to the columnsToSubqueries
-			// and also forget variables that are not in initial
-			// projection/functions and are not in remaining joins
-			ArrayList<Output> toDelete = new ArrayList<Output>();
-			for (Output o : joinSubquery.getOutputs()) {
-				if (o.getObject() instanceof Column) {
-					Column c = (Column) o.getObject();
-					boolean needed = false;
-					for (Column initial : this.initialQuery.getAllColumns()) {
-						if (c.getName().startsWith(initial.getAlias() + "_")) {
-							needed = true;
-							c2t.putColumnInTable(initial,
-									joinSubquery.getResultTableName());
-							// break;
-						}
-					}
-					// now check if we need it in remaining joins
-					if (!needed) {
-						for (NonUnaryWhereCondition remainingbwc : this.remainingWhereConditions) {
-							for (Column rc : remainingbwc.getAllColumnRefs()) {
-								if ((rc.getAlias() + "_" + rc.getName())
-										.equals(c.getName())) {
-									needed = true; // we need it for subsequent
-													// join, do not delete
-									Table t = new Table(o.getOutputName(), null);
-									c2t.putColumnInTable(
-											new Column(t.getDBName(), t
-													.getlocalName()),
-											joinSubquery.getResultTableName());
-									break;
-								}
-							}
-						}
-					}
-
-					if (!needed) {
-						toDelete.add(o);
-					}
-				}
-			}
-			for (Output delete : toDelete) {
-				joinSubquery.getOutputs().remove(delete);
-			}
-
-			result.add(joinSubquery);
-
-		}
-
-		return result;
-	}
-
-	private SQLQuery createSubqueryFromDB(String dbID) {
-
-		ArrayList<String> tablesFromDB = new ArrayList<String>();
-		for (Table t : initialQuery.getInputTables()) {
-			if (t.isFederated() && t.getDBName().equals(dbID)) {
-				tablesFromDB.add(t.getAlias());
-			}
-		}
-		return createSubqueriesForTables(tablesFromDB, dbID);
-
-	}
-
-	private SQLQuery createSubqueriesForTables(ArrayList<String> tablesFromDB,
-			String dbID) {
+	private SQLQuery createSubqueriesForTables(ArrayList<String> tablesFromDB, String dbID) {
 		SQLQuery sub = new SQLQuery();
 
 		for (Column c : initialQuery.getAllColumns()) {
@@ -831,8 +727,7 @@ public class ConjunctiveQueryDecomposer {
 						t2.setDBIdRemoved();
 					}
 					sub.setFederated(true);
-					sub.setMadisFunctionString(DBInfoReaderDB.dbInfo
-							.getDB(dbID).getMadisString());
+					sub.setMadisFunctionString(DBInfoReaderDB.dbInfo.getDB(dbID).getMadisString());
 				} else {
 					t2.setName(t.getName());
 				}
@@ -845,14 +740,13 @@ public class ConjunctiveQueryDecomposer {
 			if (tablesFromDB.contains(uwc.getAllColumnRefs().get(0).getAlias())) {
 				sub.getUnaryWhereConditions().add(uwc);
 				// add temporary column if not exists
-				sub.addOutputColumnIfNotExists(uwc.getAllColumnRefs().get(0)
-						.getAlias(), uwc.getAllColumnRefs().get(0).getName());
+				sub.addOutputColumnIfNotExists(uwc.getAllColumnRefs().get(0).getAlias(),
+						uwc.getAllColumnRefs().get(0).getName());
 
 			}
 		}
 
-		for (NonUnaryWhereCondition bwc : initialQuery
-				.getBinaryWhereConditions()) {
+		for (NonUnaryWhereCondition bwc : initialQuery.getBinaryWhereConditions()) {
 			boolean allTablesBelong = true;
 
 			// add temporary column if not exists
@@ -900,87 +794,6 @@ public class ConjunctiveQueryDecomposer {
 
 	}
 
-	private void makeSubqueryFinal(SQLQuery joinSubquery) {
-
-		// add Output of the original quey and rename table aliases to be taken
-		// from the temp subqueries
-		joinSubquery.getOutputs().clear();
-		for (Output o : this.initialQuery.getOutputs()) {
-			Operand op = o.getObject();
-
-			// rename column alias according to the initial query
-			if (op instanceof Column) {
-				Column initialOutCol = (Column) o.getObject();
-				Column newOutput = new Column(initialOutCol.getAlias(),
-						initialOutCol.getName());
-				String tablename = c2t.getTablenameForColumn(newOutput);
-				newOutput.setAlias(tablename);
-				newOutput.setName(initialOutCol.getAlias() + "_"
-						+ initialOutCol.getName());
-				o.setObject(newOutput);
-				joinSubquery.getOutputs().add(o);
-
-			} else {
-				// HashMap<Column, Column> columnsToChange = new HashMap<Column,
-				// Column>();
-				// for some strange reason program hangs in remote server when I
-				// use HashMap
-				List<Column> allRefs = op.getAllColumnRefs();
-				Column[] olds = new Column[allRefs.size()];
-				Column[] news = new Column[allRefs.size()];
-
-				for (int i = 0; i < allRefs.size(); i++) {
-					Column c = allRefs.get(i);
-					// String tempTableName =
-					// columnsToSubqueries.get(c).getResultTableName();
-					olds[i] = c;
-					news[i] = new Column(c2t.getTablenameForColumn(c),
-							c.getAlias() + "_" + c.getName());
-					// columnsToChange.put(c, new
-					// Column(c2t.getTablenameForColumn(c), c.tableAlias + "_" +
-					// c.columnName));
-					// c.columnName = c.tableAlias + "_" + c.columnName;
-					// c.tableAlias = tempTableName;
-				}
-				for (int i = 0; i < allRefs.size(); i++) {
-					// Column old : columnsToChange.keySet()
-
-					op.changeColumn(olds[i], news[i]);
-				}
-
-				joinSubquery.getOutputs().add(o);
-			}
-			// }
-
-		}
-
-		for (Column c : this.initialQuery.getGroupBy()) {
-			if (c.getAlias() != null) {
-				joinSubquery.getGroupBy().add(
-						new Column(c2t.getTablenameForColumn(c), c.getAlias()
-								+ "_" + c.getName()));
-			} else {
-				// table alias null
-				joinSubquery.getGroupBy().add(c);
-			}
-		}
-		for (ColumnOrderBy c : this.initialQuery.getOrderBy()) {
-			if (c.getAlias() != null) {
-				joinSubquery.getOrderBy().add(
-						new ColumnOrderBy(c2t.getTablenameForColumn(c), c
-								.getAlias() + "_" + c.getName(), c.isAsc));
-			} else {
-				// table alias null
-				joinSubquery.getOrderBy().add(c);
-			}
-		}
-		joinSubquery.setLimit(this.initialQuery.getLimit());
-		joinSubquery.setTemporary(false);
-		joinSubquery.setSelectAll(this.initialQuery.isSelectAll());
-		joinSubquery.setOutputColumnsDistinct(this.initialQuery
-				.getOutputColumnsDistinct());
-	}
-
 	private Node makeNodeFinal(Node n, NodeHashValues hashes) {
 		Node tempParent = n;
 		// boolean isCentralised = n.isCentralised();
@@ -1002,8 +815,7 @@ public class ConjunctiveQueryDecomposer {
 				// groupBy.setPartitionRecord(n.getPartitionRecord());
 				if (!hashes.containsKey(table.getHashId())) {
 					hashes.put(table.getHashId(), table);
-					table.addAllDescendantBaseTables(groupBy
-							.getDescendantBaseTables());
+					table.addAllDescendantBaseTables(groupBy.getDescendantBaseTables());
 				} else {
 					table = hashes.get(table.getHashId());
 				}
@@ -1029,14 +841,13 @@ public class ConjunctiveQueryDecomposer {
 				// orderBy.setLastPartition(n.getLastPartition());
 				if (!hashes.containsKey(table.getHashId())) {
 					hashes.put(table.getHashId(), table);
-					table.addAllDescendantBaseTables(orderBy
-							.getDescendantBaseTables());
+					table.addAllDescendantBaseTables(orderBy.getDescendantBaseTables());
 				} else {
 					table = hashes.get(table.getHashId());
 				}
 				tempParent = table;
 			} else {
-				log.error("GROUP BY not supported!");
+				// log.error("ORDER BY not supported!");
 			}
 		}
 		if (!this.initialQuery.isSelectAll()) {
@@ -1056,8 +867,7 @@ public class ConjunctiveQueryDecomposer {
 				// projection.setLastPartition(tempParent.getLastPartition());
 				if (!hashes.containsKey(projection.getHashId())) {
 					hashes.put(projection.getHashId(), projection);
-					projection.addAllDescendantBaseTables(tempParent
-							.getDescendantBaseTables());
+					projection.addAllDescendantBaseTables(tempParent.getDescendantBaseTables());
 				} else {
 					projection = hashes.get(projection.getHashId());
 				}
@@ -1069,14 +879,12 @@ public class ConjunctiveQueryDecomposer {
 			 * n2.addChild(tempParent); tempParent = n2; }
 			 */
 			Node projTable = new Node(Node.OR);
-			projTable
-					.setObject(new Table("table" + Util.createUniqueId(), null));
+			projTable.setObject(new Table("table" + Util.createUniqueId(), null));
 			projTable.addChild(tempParent);
 
 			if (!hashes.containsKey(projTable.getHashId())) {
 				hashes.put(projTable.getHashId(), projTable);
-				projTable.addAllDescendantBaseTables(tempParent
-						.getDescendantBaseTables());
+				projTable.addAllDescendantBaseTables(tempParent.getDescendantBaseTables());
 			} else {
 				projTable = hashes.get(projTable.getHashId());
 			}
@@ -1092,8 +900,7 @@ public class ConjunctiveQueryDecomposer {
 			// projection.setLastPartition(tempParent.getLastPartition());
 			if (!hashes.containsKey(limit.getHashId())) {
 				hashes.put(limit.getHashId(), limit);
-				limit.addAllDescendantBaseTables(tempParent
-						.getDescendantBaseTables());
+				limit.addAllDescendantBaseTables(tempParent.getDescendantBaseTables());
 			} else {
 				limit = hashes.get(limit.getHashId());
 			}
@@ -1103,14 +910,12 @@ public class ConjunctiveQueryDecomposer {
 			tempParent = limit;
 
 			Node limitTable = new Node(Node.OR);
-			limitTable.setObject(new Table("table" + Util.createUniqueId(),
-					null));
+			limitTable.setObject(new Table("table" + Util.createUniqueId(), null));
 			limitTable.addChild(tempParent);
 
 			if (!hashes.containsKey(limitTable.getHashId())) {
 				hashes.put(limitTable.getHashId(), limitTable);
-				limitTable.addAllDescendantBaseTables(tempParent
-						.getDescendantBaseTables());
+				limitTable.addAllDescendantBaseTables(tempParent.getDescendantBaseTables());
 			} else {
 				limitTable = hashes.get(limitTable.getHashId());
 			}
@@ -1119,55 +924,6 @@ public class ConjunctiveQueryDecomposer {
 
 		return tempParent;
 
-		// joinSubquery.setLimit(this.initialQuery.getLimit());
-		// joinSubquery.setTemporary(false);
-		// joinSubquery.setSelectAll(this.initialQuery.isSelectAll());
-		// joinSubquery.setOutputColumnsDistinct(this.initialQuery.getOutputColumnsDistinct());
-	}
-
-	private SQLQuery getTemporarySubquery(String tablename) {
-		for (SQLQuery q : this.result) {
-			if (q.getResultTableName().equals(tablename)) {
-				return q;
-			}
-		}
-		for (SQLQuery q : this.nestedSubqueries) {
-			if (q.getResultTableName().equals(tablename)) {
-				return q;
-			}
-		}
-		return null;
-	}
-
-	// void addNestedSubquery(SQLQuery s) {
-	// this.nestedSubqueries.add(s);
-	// }
-	private void renameOutputColumnsInNestedSubs() {
-		for (SQLQuery next : this.initialQuery.getNestedSubqueries()) {
-			for (Output o : next.getOutputs()) {
-				// change output in order by and group by
-				for (Column ob : next.getOrderBy()) {
-					if (ob.getName().equals(o.getOutputName())) {
-						ob.changeColumn(
-								ob,
-								new Column(null, this.initialQuery
-										.getNestedSubqueryAlias(next)
-										+ "_"
-										+ o.getOutputName()));
-					}
-				}
-				for (Column ob : next.getGroupBy()) {
-					if (ob.getName().equals(o.getOutputName())) {
-						ob.setName(this.initialQuery
-								.getNestedSubqueryAlias(next)
-								+ "_"
-								+ o.getOutputName());
-					}
-				}
-				o.setOutputName(this.initialQuery.getNestedSubqueryAlias(next)
-						+ "_" + o.getOutputName());
-			}
-		}
 	}
 
 	Set<Join> getJoins() {

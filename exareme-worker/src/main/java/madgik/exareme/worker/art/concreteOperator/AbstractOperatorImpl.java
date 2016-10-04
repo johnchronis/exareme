@@ -249,7 +249,7 @@ public abstract class AbstractOperatorImpl {
      *
      * @throws Exception
      */
-    public abstract void run() throws Exception;
+    public abstract void run(String opname) throws Exception;
 
     public OperatorGroupManagerInterface getOperatorGroupManager() {
         return operatorGroupManager;

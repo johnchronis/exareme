@@ -162,7 +162,7 @@ public class AdpDBParser {
         for (String def : registry.getTableDefinitions()) {
             log.trace("Table def : " + def);
             if (def != null)
-                imdb.execute(def);
+                imdb.executeUpdate(def);
             else
                 log.trace("No registry def");
         }
@@ -271,7 +271,7 @@ public class AdpDBParser {
             }
             log.debug("Create the output table ...");
             String outTableName = q.getOutputTable().getTable().getName();
-            imdb.execute(
+            imdb.executeUpdate(
                 "create table " + outTableName + " as " + q.getSelectQueryStatement() + ";\n");
             TableInfo tableInfo = imdb.getTableInfo(outTableName);
             tables.get(outTableName).setSqlDefinition(tableInfo.getSQLDefinition());
@@ -303,10 +303,23 @@ public class AdpDBParser {
             id++;
         }
         log.debug("Checking build index for semantic errors ...");
-        for (DMQuery dm : script.getDMQueries()) {
+        for (int i=0;i< script.getDMQueries().size();i++) {
+        	DMQuery dm = script.getDMQueries().get(i);
             log.debug("Checking query \n" + dm.getQuery());
             if (registry.containsPhysicalTable(dm.getTable()) == false) {
-                throw new SemanticException("Table not exists: " + dm.getTable());
+            	boolean indexOnSelectQuery=false;
+            	for(Select s:script.getSelectQueries()){
+            		if(s.getOutputTable().getName().equals(dm.getTable())){
+            			s.setIndexCommand(dm.getQuery());
+            			script.removeDMQuery(dm);
+            			i--;
+            			indexOnSelectQuery=true;
+            			break;
+            		}
+            	}
+            	if(!indexOnSelectQuery){
+            		throw new SemanticException("Table not exists: " + dm.getTable());
+            	}
             }
             // TODO(herald): check if the index exists.
         }
