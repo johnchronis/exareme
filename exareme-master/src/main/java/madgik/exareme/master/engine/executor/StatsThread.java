@@ -5,7 +5,7 @@ import java.io.*;
 /**
  * Created by johnchronis on 22/9/2016.
  */
-public class StatsThread extends Thread {
+public class  StatsThread  extends Thread {
     public int count=0;
     public double memmax=0;
     public double cpuavg=0;

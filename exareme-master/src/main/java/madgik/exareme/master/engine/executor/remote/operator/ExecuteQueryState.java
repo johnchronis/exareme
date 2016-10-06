@@ -268,8 +268,7 @@ public class ExecuteQueryState {
         // Create the executor
         MadisProcessExecutor exec = new MadisProcessExecutor(rootDirectory,
             AdpDBProperties.getAdpDBProps().getInt("db.engine.pageSize_b"),
-            AdpDBProperties.getAdpDBProps().getInt("db.engine.defaultMemory_mb"), procManager,
-             opname   );
+            AdpDBProperties.getAdpDBProps().getInt("db.engine.defaultMemory_mb"), procManager,opname);
 
         // Execute select query
         execResult = exec.exec(this);

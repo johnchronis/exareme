@@ -18,6 +18,7 @@ import madgik.exareme.worker.arm.storage.client.ArmStorageClient;
 import madgik.exareme.worker.arm.storage.client.ArmStorageClientException;
 import madgik.exareme.worker.arm.storage.client.ArmStorageClientFactory;
 import madgik.exareme.worker.art.concreteOperator.manager.ProcessManager;
+import madgik.exareme.common.app.engine.AdpDBOperatorType;
 import org.apache.log4j.Logger;
 
 import java.io.File;
@@ -26,13 +27,14 @@ import java.rmi.ServerException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author herald
  */
 public class MadisProcessExecutor {
-	private static final String additionalCommands =
-		AdpDBProperties.getAdpDBProps().getString("db.engine.script.additional");
+	private static final String additionalCommands = AdpDBProperties.getAdpDBProps()
+			.getString("db.engine.script.additional");
 	private static final Logger log = Logger.getLogger(MadisProcessExecutor.class);
 	private File directory = null;
 	private long page_size_B = 0;
@@ -42,23 +44,22 @@ public class MadisProcessExecutor {
 	private String compresion = AdpDBProperties.getAdpDBProps().getString("db.execute.compresion");
 
 	double  outsize=0; //MB
-	double memmax=0; //%
-	double cpuavg=0; //%
-	String opname;
+   double memmax=0; //%
+   double cpuavg=0; //%
+  String opname;
 	double initmem;
-	long end,start;
-	double minmem;
 
-	public MadisProcessExecutor(File directory, int page_size_B, int memory_MB,
-		ProcessManager procManager,String opname) {
+	long end,start;
+    double minmem;
+
+	public MadisProcessExecutor(File directory, int page_size_B, int memory_MB, ProcessManager procManager,
+								String opname) {
 		this.directory = directory;
 		this.page_size_B = page_size_B;
 		this.memory_MB = memory_MB;
 		this.pages = memory_MB * 1024L * 1024L / this.page_size_B;
 		this.procManager = procManager;
 		log.debug("Directory is : " + directory.getAbsoluteFile());
-		this.opname = opname;
-
 	}
 
 	public MadisExecutorResult exec(ExecuteQueryState state) throws RemoteException {
@@ -76,12 +77,15 @@ public class MadisProcessExecutor {
 			script.append("PRAGMA cache_size = " + pages + "; \n");
 			script.append("PRAGMA page_size = " + page_size_B + "; \n");
 			script.append("PRAGMA page_size; \n");
+			script.append("PRAGMA cache_size; \n");
 			script.append("\n");
 			script.append("-- Additional Commands \n");
 			if (additionalCommands != null) {
 				script.append(additionalCommands + "\n");
 			}
 			script.append("\n");
+			
+			String oneTableloc=null;
 
 			HashMap<String, ArrayList<String>> nonLocalTableDatabases = new HashMap<>();
 
@@ -128,8 +132,7 @@ public class MadisProcessExecutor {
 					} else {
 						Integer count = partCount.get(part);
 						if (count == null) { // Local
-							loc = absoluteDBDir + "/" + input + DBConstants.DB_SEPERATOR + part
-								+ ".db";
+							loc = absoluteDBDir + "/" + input + DBConstants.DB_SEPERATOR + part + ".db";
 							dbName = input + part;
 							local = true;
 						} else { // Remote
@@ -143,29 +146,28 @@ public class MadisProcessExecutor {
 							}
 							int c = current.get(part);
 							current.put(part, c + 1);
-							loc = directory.getAbsolutePath() + "/" + input +
-								DBConstants.DB_SUBPART_SEPERATOR + part +
-								DBConstants.DB_SEPERATOR + c + ".db";
+							loc = directory.getAbsolutePath() + "/" + input + DBConstants.DB_SUBPART_SEPERATOR + part
+									+ DBConstants.DB_SEPERATOR + c + ".db";
 							dbName = input + part + c;
 						}
 					}
-					//          if dfs is used then can not skip
-					//          if (new File(loc).length() == 0) {
-					//            log.info("Skipping table: " + input + "." + part);
-					//            continue;
-					//          }
+					// if dfs is used then can not skip
+					// if (new File(loc).length() == 0) {
+					// log.info("Skipping table: " + input + "." + part);
+					// continue;
+					// }
 					// Attach only local databases
 					if (local == true) {
 
 						try {
 							storageClient.fetch(loc, loc);
 						} catch (ArmStorageClientException e) {
-							log.error(
-								"Error occurred while storage client try to fetch partitions!");
+							log.error("Error occurred while storage client try to fetch partitions!");
 							throw new RemoteException();
 						}
 
 						attachedDBs.append("attach database '" + loc + "' as " + dbName + "; \n");
+						oneTableloc=loc;
 						attachedDBs.append(".schema " + dbName + "." + input + "; \n");
 						numInputDatabases++;
 					} else {
@@ -192,22 +194,21 @@ public class MadisProcessExecutor {
 				String loc = nonLocalTablePartLocations.get(input).get(0);
 				if (nonLocalTablePartLocations.get(input).size() == 1) {
 					attachedDBs.append("attach database '" + loc + "' as " + input + "; \n");
+					oneTableloc=loc;
 					attachedDBs.append(".schema " + input + "." + input + "; \n");
 					numInputDatabases++;
 				} else {
 					ArrayList<String> locations = nonLocalTablePartLocations.get(input);
 					for (int part = 0; part < locations.size(); ++part) {
 						String dbName = input + part;
-						createTables.append(
-							"attach database '" + locations.get(part) + "' as " + dbName + "; \n");
+						oneTableloc=locations.get(part);
+						createTables.append("attach database '" + locations.get(part) + "' as " + dbName + "; \n");
 						if (part == 0) {
-							createTables.append(
-								"create temp table " + input + " as select * from " + dbName + "."
+							createTables.append("create temp table " + input + " as select * from " + dbName + "."
 									+ input + "; \n");
 						} else {
-							createTables.append(
-								"insert into " + input + " select * from " + dbName + "." + input
-									+ "; \n");
+							createTables
+									.append("insert into " + input + " select * from " + dbName + "." + input + "; \n");
 						}
 						createTables.append("detach database " + dbName + "; \n");
 					}
@@ -220,15 +221,22 @@ public class MadisProcessExecutor {
 			script.append(createTables);
 			script.append("\n");
 
+			if (state.getOperator().getQuery().getExtraCommand() != null) {
+				script.append("-- Extra Commands \n");
+				script.append(state.getOperator().getQuery().getExtraCommand());
+				script.append("\n");
+			}
+
 			String query = state.getOperator().getQuery().getSelectQueryStatement();
 			log.debug("Query : " + query);
 			TableView output = state.getOperator().getQuery().getOutputTable();
 			String outputTable = output.getTable().getName();
 			String madisMainDB = outputTable + ".dummy.db";
 
-			//            script.append("-- Explain Query \n");
-			// Skip explain query <- valuable when the has net communications with external sources (e.g. oracle)
-			//            script.append("explain query plan " + query + ";\n\n");
+			// script.append("-- Explain Query \n");
+			// Skip explain query <- valuable when the has net communications
+			// with external sources (e.g. oracle)
+			// script.append("explain query plan " + query + ";\n\n");
 
 			script.append("-- Run Query \n");
 			List<String> queryStms = state.getOperator().getQuery().getQueryStatements();
@@ -242,8 +250,7 @@ public class MadisProcessExecutor {
 				script.append(query + ";\n\n");
 				List<Integer> parts = state.getOperator().getOutputPartitions(outputTable);
 				if (parts.size() != 1) {
-					throw new ServerException(
-						"Output table extected to have only one output but has " + parts.size());
+					throw new ServerException("Output table extected to have only one output but has " + parts.size());
 				}
 				int part = parts.get(0);
 
@@ -253,7 +260,7 @@ public class MadisProcessExecutor {
 					script.append("output split:1 '" + outputTable + ".db' select 0, * from (" + query + ") as q;\n\n");
 				} else {
 					script.append("output split:" + outputParts + " '" + outputTable + ".db'");
-					//                    script.append(" select hashmd5mod(");
+					// script.append(" select hashmd5mod(");
 					// TODO(herald): change it to the following ...
 					script.append(" select hashmodarchdep(");
 					for (String column : output.getPatternColumnNames()) {
@@ -262,6 +269,11 @@ public class MadisProcessExecutor {
 					script.append(outputParts + "),* from (" + query + ") as q;\n\n");
 				}
 			}
+			if (state.getOperator().getQuery().getIndexCommand() != null) {
+				log.debug("Adding index on table : \n" + state.getOperator().getQuery().getIndexCommand());
+				script.append(state.getOperator().getQuery().getIndexCommand());
+				script.append("; \n");
+			}
 			script.append("-- Cleanup \n");
 			for (String input : nonLocalTableDatabases.keySet()) {
 				ArrayList<String> databases = nonLocalTableDatabases.get(input);
@@ -269,32 +281,43 @@ public class MadisProcessExecutor {
 					continue;
 				}
 			}
+
 			script.append("\n-- Script END \n\n");
 			log.debug("Executing script : \n" + script.toString());
-			log.debug(
-				"Main Database    : " + directory.getAbsolutePath() + "/" + madisMainDB + " \n");
+			log.debug("Main Database    : " + directory.getAbsolutePath() + "/" + madisMainDB + " \n");
 
 			// optimization -> if the result is select * ... then
-			//                 just alter the input table to the output table.
-			//                 This is the case in the import.
+			// just alter the input table to the output table.
+			// This is the case in the import.
 			String simpleQuery = "select_*_from_" + outputTable;
-			String inputQuery =
-				query.trim().replaceAll("( )+", " ").replaceAll("\n", " ").replaceAll(" ", "_");
+			// String inputQuery =
+			// query.trim().replaceAll("( )+", " ").replaceAll("\n", "
+			// ").replaceAll(" ", "_");
+			String inputQuery = query.trim().replaceAll("( )+", " ").replaceAll("\n", " ").replaceAll("\\ +", " ")
+					.replaceAll("_", "__").replaceAll(" ", "_");
 			log.debug("Input Query: '" + inputQuery + "'");
 			log.debug("Simple Query: '" + simpleQuery + "'");
 
 			String stats = "";
-			if (numInputDatabases == 1 &&
-				(inputQuery.equals("select_*_from_" + outputTable) ||
-					inputQuery.equals("select_from_" + outputTable))) {
+			if (numInputDatabases == 1 && (inputQuery.equals("select_*_from_" + outputTable)
+					|| inputQuery.equals("select_from_" + outputTable))) {
 				log.debug("Optimized ... just use ln ...");
 				String input = state.getOperator().getInputTables().iterator().next();
 				if (nonLocalTablePartLocations.get(input) == null) {
 					log.warn("input non local & non remote ?");
+					log.warn("input:"+input);
+					log.warn("non local"+nonLocalTablePartLocations);
+					log.warn("table loc:"+oneTableloc);
+					Pair<String, String> stdOutErr = procManager.createAndRunProcess(directory, "ln", oneTableloc,
+							directory.getAbsolutePath() + "/" + madisMainDB);
+
+					if (stdOutErr.b.trim().isEmpty() == false) {
+						throw new ServerException("Cannot execute ln: " + stdOutErr.b);
+					}
+					log.debug(stdOutErr.a);
 				} else {
 					String loc = nonLocalTablePartLocations.get(input).get(0);
-					Pair<String, String> stdOutErr = procManager
-						.createAndRunProcess(directory, "ln", loc,
+					Pair<String, String> stdOutErr = procManager.createAndRunProcess(directory, "ln", loc,
 							directory.getAbsolutePath() + "/" + madisMainDB);
 
 					if (stdOutErr.b.trim().isEmpty() == false) {
@@ -305,18 +328,16 @@ public class MadisProcessExecutor {
 			} else {
 				// Run query
 				start = System.currentTimeMillis();
-				StatsThread statsThread = new StatsThread();
-				statsThread.start();
+				               StatsThread statsThread = new StatsThread();
+				            statsThread.start();
 				stats = ExecUtils.runQueryOnTable(script, madisMainDB, directory, procManager);
 				end = System.currentTimeMillis();
-				cpuavg = statsThread.cpuavg;
-				memmax = statsThread.memmax;
-				initmem = statsThread.initmem;
-				minmem = statsThread.minmem;
-				statsThread.stop();
+				               cpuavg = statsThread.cpuavg;
+				                memmax = statsThread.memmax;
+				                initmem = statsThread.initmem;
+				                minmem = statsThread.minmem;
+				                statsThread.stop();
 			}
-
-
 
 			String outputDBFile = null;
 			log.debug("Check if all output files are created ...");
@@ -325,14 +346,9 @@ public class MadisProcessExecutor {
 				for (int part = 0; part < outputParts; ++part) {
 					if (broadcast && part != 0) {
 						File clonefile = new File(directory.getAbsolutePath() + "/" + outputTable + "." + part + ".db");
-						//                        clonefile.createNewFile();
-
-						Pair<String, String> stdOutErr = procManager.createAndRunProcess(
-							directory,
-							"ln",
-							directory.getAbsolutePath() + "/" + outputTable + ".0.db",
-							clonefile.getAbsolutePath()
-						);
+						// clonefile.createNewFile();
+						Pair<String, String> stdOutErr = procManager.createAndRunProcess(directory, "ln",
+								directory.getAbsolutePath() + "/" + outputTable + ".0.db", clonefile.getAbsolutePath());
 
 						if (stdOutErr.b.trim().isEmpty() == false) {
 							throw new ServerException("Cannot execute ln: " + stdOutErr.b);
@@ -343,8 +359,7 @@ public class MadisProcessExecutor {
 					f = new File(directory.getAbsolutePath() + "/" + outputTable + "." + part + ".db");
 					outsize +=f.length();//kB
 					if (!f.exists()) {
-						throw new ServerException(
-							"Partition not found:" + outputTable + "/" + part);
+						throw new ServerException("Partition not found:" + outputTable + "/" + part);
 					}
 					if (f.createNewFile()) {
 						log.debug("No records in : " + outputTable + "." + part);
@@ -355,19 +370,18 @@ public class MadisProcessExecutor {
 			} else {
 				outputDBFile = directory.getAbsolutePath() + "/" + madisMainDB;
 				outsize +=outputDBFile.length();//kB
-
 			}
-			if(outputParts>0) {
-				outsize *= outputParts;
+			            if(outputParts>0) {
+				                outsize *= outputParts;
 			}
 			outsize=0;
-			for (int part = 0; part < outputParts; ++part) {
-				File f = new File(directory.getAbsolutePath() + "/" + outputTable + "." + part + ".db");
-				outsize += f.length();
-			}
-			outsize /= 1024*1024;
-			log.debug("%% "+outputParts+" "+madisMainDB+" "+directory.getAbsolutePath());
-			log.debug("madisstats $$$ "+ opname+" time_ms "+(end-start) +" c "+cpuavg+" m "+(memmax)+ " monlyExa"+(memmax-initmem) + " " +minmem+ " d MB "+outsize);
+			            for (int part = 0; part < outputParts; ++part) {
+				                File f = new File(directory.getAbsolutePath() + "/" + outputTable + "." + part + ".db");
+				                outsize += f.length();
+				            }
+			            outsize /= 1024*1024;
+			            log.debug("%% "+outputParts+" "+madisMainDB+" "+directory.getAbsolutePath());
+			            log.debug("madisstats $$$ "+ opname+" time_ms "+(end-start) +" c "+cpuavg+" m "+(memmax)+ " monlyExa"+(memmax-initmem) + " " +minmem+ " d MB "+outsize);
 
 			MadisExecutorResult execResult = new MadisExecutorResult();
 			SQLDatabase sqlDB = DBUtils.createEmbeddedSqliteDB(outputDBFile);
@@ -384,7 +398,9 @@ public class MadisProcessExecutor {
 				log.error("Error while storage client try to disconnect!");
 				throw new RemoteException();
 			}
-
+			//if (AdpDBProperties.getAdpDBProps().getString("db.cache").equals("true")) {
+			execResult.getTableInfo().setSqlQuery(inputQuery);
+			//}
 			return execResult;
 		} catch (Exception e) {
 			throw new ServerException("Cannot execute madis", e);
