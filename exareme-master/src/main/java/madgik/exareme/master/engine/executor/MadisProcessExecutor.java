@@ -59,6 +59,7 @@ public class MadisProcessExecutor {
 		this.memory_MB = memory_MB;
 		this.pages = memory_MB * 1024L * 1024L / this.page_size_B;
 		this.procManager = procManager;
+		this.opname = opname;
 		log.debug("Directory is : " + directory.getAbsoluteFile());
 	}
 
